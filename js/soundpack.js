@@ -24,7 +24,7 @@
 // each other (a lock, a clear and the bed regularly land in the same 200 ms):
 //   bed 40–540 · lock/topout thump 22–320 · clear settle 30–90
 //   tspin creak 200–1100 · turn/hold body 500–1300 · quad front 120–1900
-//   clear shatter 1.2k–7k · shift strike 5k–9k
+//   goal/singularity body 72–430 · clear shatter 1.2k–7k · shift strike 5k–9k
 //
 // Every cue takes an `r` (the SDK's seeded random stream, a fresh seed per
 // play) and varies pitch, timing, grain and layer balance with it. Nothing here
@@ -441,6 +441,56 @@
                 at += S.between(r, 0.075, 0.105);
             }
             return 3.4;
+        },
+
+        // Goal — Sprint 40's fortieth line, or Ultra's clock running out. A run
+        // ENDING, which is a different thing from a level ticking over, and the
+        // pack now has three poles to place it between: `topout` is final and
+        // negative, `levelup` is positive and passing, and this is positive and
+        // final.
+        //
+        // Finality is carried by direction. `levelup` climbs a fifth, an octave
+        // and a twelfth and leaves the last note hanging up there — the run
+        // continues, and the sound says so by not landing. This one goes the
+        // other way: root, fifth above, then a fourth BELOW the root arriving
+        // last and ringing longest, so the gesture comes to rest lower than it
+        // started. The strike at the front is what makes it struck rather than
+        // swelled, and the thump under it is the well taking the weight.
+        //
+        // Same near-harmonic body as `singularity`, for the same reason: this is
+        // the shaft's own voice, and the shaft is a tube.
+        'goal': function (ctx, o, t, p, r) {
+            const at = seed(r);
+            const f0 = S.between(r, 126, 142) * S.cents(r, 8);
+            S.strike(ctx, o, t, {
+                dur: 0.010, hp: S.between(r, 1600, 2200),
+                gain: EVENT * 0.34, seed: at,
+            });
+            S.thump(ctx, o, t, {
+                f0: S.between(r, 64, 74), f1: 28,
+                dur: S.between(r, 1.1, 1.4), attack: 0.020,
+                gain: EVENT * 0.55, seed: at + 1,
+            });
+            // root · fifth above · fourth below — the last voice is the lowest,
+            // and the longest, which is the whole reason this reads as an ending
+            const voices = [
+                { ratio: 1.00, at: 0.00, gain: 0.58, decay: S.between(r, 2.6, 3.2) },
+                { ratio: 1.50, at: S.between(r, 0.09, 0.13), gain: 0.40, decay: S.between(r, 2.2, 2.8) },
+                { ratio: 0.75, at: S.between(r, 0.22, 0.30), gain: 0.52, decay: S.between(r, 3.6, 4.4) },
+            ];
+            for (let i = 0; i < voices.length; i++) {
+                const v = voices[i];
+                S.body(ctx, o, t + v.at, {
+                    f0: f0 * v.ratio * S.cents(r, 5),
+                    gain: EVENT * v.gain,
+                    partials: [
+                        { ratio: 1.00, gain: 1.00, decay: v.decay, detune: 4, attack: 0.035 },
+                        { ratio: 2.00, gain: 0.30, decay: v.decay * 0.45, detune: 7, attack: 0.025, delay: 0.03 },
+                        { ratio: 3.02, gain: 0.11, decay: v.decay * 0.20, detune: 9, delay: 0.06 },
+                    ],
+                });
+            }
+            return 4.8;
         },
 
         // Top out. One deep thump, long and slow to arrive, and nothing else —

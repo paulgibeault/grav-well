@@ -277,6 +277,11 @@ export function createAudio(opts) {
                     // the shatter is the four rows going, the blast is the well
                     // answering from far up the shaft (send 0.72).
                     if (e.count >= 4) a.play('quad');
+                    // A Singularity (DESIGN §1) — the well is empty. Layered
+                    // for the same reason: the rows did break, and this is what
+                    // the shaft does about it afterwards, from further away than
+                    // anything else in the pack (send 0.85).
+                    if (e.perfectClear) a.play('singularity');
                     break;
                 case 'hold':
                     a.play('hold');
@@ -285,11 +290,12 @@ export function createAudio(opts) {
                     a.play('levelup');
                     break;
                 case 'goal':
-                    // Sprint 40 finished, or Ultra's clock ran out. §6 lists no
-                    // cue of its own for it; the level-up gliss is the pack's
-                    // "the well opens out" gesture and is the honest stand-in
-                    // until one exists. See the report note.
-                    a.play('levelup');
+                    // Sprint 40's fortieth line, or Ultra's clock running out —
+                    // a run ENDING. It gets its own cue rather than borrowing
+                    // `levelup`: a level tick is a milestone passed mid-run, and
+                    // reusing it would make the end of a run sound like
+                    // something inside one.
+                    a.play('goal');
                     break;
                 case 'topout':
                     a.play('topout');
