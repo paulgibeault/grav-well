@@ -187,7 +187,10 @@ t(n) = (0.8 − (n − 1) × 0.007) ^ (n − 1)
 | s/row | 1.000 | 0.793 | 0.618 | 0.355 | 0.135 | 0.064 | 0.028 | 0.007 |
 
 - Level advances every **10 lines** (fixed goal). Marathon runs levels 1–15
-  (150 lines); an **Endless** toggle continues the curve past 15.
+  (150 lines). An **Endless** continuation past 15 is **deferred out of v1**:
+  it hangs off open question 3 below, which is unresolved, and a toggle no
+  code can read is worse than an absent feature. The gravity curve already
+  supports it — only the goal and the setting are missing.
 - **Gravity above 1G is real.** `1G` is one row per tick; `20G` is twenty rows
   per tick. The curve crosses 1G at level **14**, so from there a single tick
   drops several rows — `floor(accumulated / interval)`, capped at 20 — and the
@@ -270,7 +273,7 @@ seed + input log, and the entire core is unit-testable under `node --test`.
 | **Sprint 40** | Clear 40 lines fastest. Instant retry on `R`. | record `sprint-40` (`duration-ms`, lower-is-better) |
 | **Ultra** | 3:00 on the clock, max score. | leaderboard `ultra`, record `ultra-score` |
 | **Zen** | Level-1 gravity forever, no top-out (an overflowing well gently sinks the bottom rows away), untimed. | lines/session stats only, resumable |
-| **Daily Well** | One shared seed per device-local day (`Arcade.daily.seed()`): the well starts with 8 rows of seeded debris — dig it clear, fastest time. Same debris, same bag stream, for every player. | leaderboard `daily` keyed by `dateStr` (`order: 'asc'`), streak in stats |
+| **Daily Well** | One shared seed per device-local day: the well starts with 8 rows of seeded debris — dig it clear, fastest time. Same debris, same bag stream, for every player. Note `Arcade.daily.seed()` returns a seeded **generator**, not a seed value — take `.getState()` for a number, or the whole run collapses to one constant seed for every player on every day. | leaderboard `daily` keyed by `dateStr` (`order: 'asc'`), streak in stats |
 
 Every mode keeps its own resumable snapshot (fleet convention — switching
 modes never costs progress).
@@ -556,8 +559,10 @@ contract fits turn-paced garbage exchange well), replay capture & theater
    stackers use. Preference?
 2. **Daily Well format** — seeded 8-row dig-race (spec) vs a seeded Ultra.
    Dig differentiates days more, Ultra is simpler. Both?
-3. **Endless cap** — clamp at 20G, or hard-stop Marathon at 15 and keep
-   Endless a separate toggle (spec)?
+3. **Endless cap** — deferred out of v1 (see §2.6). When it lands: clamp at
+   20G, or hard-stop Marathon at 15 and keep Endless a separate toggle? The
+   curve reaches true 20G at level 19 on its own, which argues for letting it
+   run rather than clamping early.
 
 **Resolved.** *Touch default* — **gesture-first**, decided 2026-08-22. Both
 input paths stay live at once on every device (§4); the button cluster remains
