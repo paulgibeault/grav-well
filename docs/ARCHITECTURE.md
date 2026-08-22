@@ -102,6 +102,25 @@ export function tryRotate(board, piece, dir)     // dir: +1 CW, -1 CCW
 // → { piece: rotatedPiece, kick: [dx,dy], kickIndex: 0..4 }  or  null when every test collides
 ```
 
+Resolved conventions (each pinned by a test):
+
+- **`kick` comes back VERBATIM in +y-up form**, exactly as tabulated in
+  DESIGN.md §2.4, so a reader can diff it against the spec. The returned
+  `piece` already has the y-down result applied, so callers want `piece`;
+  `kick` is for diagnostics. `kickIndex` is what T-spin detection needs.
+- **`collides` rejects `y < 0`** — a cell above the ceiling has nowhere to be
+  stored — while `cellAt` reports `0` (empty) up there. The asymmetry is
+  deliberate: `cellAt`'s job is "what is in this square", `collides`'s job is
+  "may the piece be here". Unreachable in normal play (spawn is row 18, with
+  18 rows of headroom above it), but defined rather than accidental.
+- **`kicksFor` throws `RangeError` on a non-quarter turn** (`'0>2'`). v1 has
+  no 180° input; when one arrives it needs a real table, and a throw makes
+  that obvious instead of silently rotating with no kicks.
+- **`fromStrings(rows, { fromRow, id })` bottom-aligns by default**, so a
+  3-row fixture is rows 37–39 and reads like the bottom of the well. It
+  throws on a row that is not exactly `COLS` wide — a mistyped fixture should
+  fail at the typo, not three assertions later.
+
 ## js/core/bag.js
 
 ```js
