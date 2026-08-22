@@ -289,7 +289,52 @@ as a bug.
 
 ## js/app/*
 
-The only layer that may touch `Arcade`. `js/app/store.js` owns every
-`Arcade.state` key (schema in issue #1 §8); nothing else calls
-`Arcade.state.*`. `js/app/audio.js` owns every `Arcade.audio` call and
-consumes `g.events`. `js/app/modes.js` owns mode configuration.
+The only layer that may touch `Arcade`. Frozen split:
+
+```js
+// js/app/store.js — the ONLY caller of Arcade.state/stats/records/scores
+export function loadSettings()             // getOrInit over DEFAULTS
+export function saveSettings(s)            // { sync: true }
+export function loadRun(modeId)            // → snapshot | null
+export function saveRun(modeId, snapshot)  // synchronous; safe to call from onSuspend
+export function clearRun(modeId)
+export function recordResult(modeId, r)    // scores.add / records.best / stats.update
+export function loadStats()
+export function onExternalChange(fn)       // onStateReplaced + state.onChange, one subscription
+
+// js/app/modes.js — PURE config, no Arcade
+export const MODES                          // { marathon, sprint, ultra, zen, daily }
+export function gameOptsFor(modeId, seed)   // → the opts object createGame() takes
+
+// js/app/settings.js — the Arcade.settings bridge, guarded reads
+export function readArcadeSettings()        // → { theme, fontScale, reducedMotion, powerSaver, handedness }
+export function onArcadeSettingsChange(fn)  // → unsubscribe
+
+// js/app/ui.js — screens, menus, overlay, banner. No game logic.
+export function createUI(root, handlers)    // → { show(screen, data), banner(text, kind), setDanger(b), dispose() }
+```
+
+`js/app/audio.js` owns every `Arcade.audio` call. `js/main.js` is the only
+place that wires these together.
+
+### DOM hooks the app layer must drive
+
+Set by the app, styled by `css/well.css`, emitted by `js/input/touch.js`:
+
+| hook | when |
+| --- | --- |
+| `#app[data-screen]` | current screen |
+| `#app[data-danger="true"]` | stack crosses row 16 — drives the finite vignette pulse |
+| `#banner[data-kind="record"\|"alert"]` | banner styling; `textContent = ''` dismisses (`:empty` hides it) |
+| `#touch[data-scheme="gesture"\|"buttons"]` | control scheme |
+| `#touch[data-handedness="left"\|"right"]` | from `Arcade.settings.handedness()` |
+
+**`#touch` is unhidden unconditionally.** Gestures are the primary scheme and
+one Pointer Events path serves trackpad and touch alike, so there is no
+device test — a laptop needs the surface too. Keyboard and pointer input are
+both attached at all times, on every device.
+
+**`cellPx` must be pushed, not measured.** The touch layer falls back to
+measuring the gesture surface, which drifts ~25% at `--font-scale: 1.5`.
+`js/main.js` reads the true cell size from the renderer and pushes it with
+`touch.setOpts({ cellPx })` on every resize and font-scale change.
