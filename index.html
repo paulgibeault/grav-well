@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Gravity Well</title>
+  <meta name="description" content="A faithful falling-block stacker — 7-bag, wall kicks, T-spins, and a daily dig down the well.">
+  <meta name="theme-color" content="#070B14">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="512x512" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="stylesheet" href="css/well.css">
+  <script src="/arcade-sdk.js"></script>
+  <script>Arcade.init({ gameId: 'grav-well' });</script>
+  <!-- SDK companion: the physical-gesture element library behind
+       Arcade.audio.graph(). If it 404s (a stale cache, a non-launcher embed),
+       js/app/audio.js registers nothing and the game plays silent — by design
+       (GAME_INTEGRATION.md §5: the pack IS the sound, there is no fallback). -->
+  <script src="/arcade-audio.js"></script>
+  <!-- The Gravity Well sound pack. Plain script, must load before js/main.js. -->
+  <script src="js/soundpack.js"></script>
+</head>
+<body>
+  <div id="app" data-screen="loading">
+    <main id="stage">
+      <aside class="rail rail-left">
+        <section class="panel" id="hold-panel">
+          <h2>Hold</h2>
+          <canvas id="hold" width="96" height="72" aria-label="Held piece"></canvas>
+        </section>
+        <dl class="readout" id="readout">
+          <dt>Score</dt><dd id="v-score">0</dd>
+          <dt>Lines</dt><dd id="v-lines">0</dd>
+          <dt>Level</dt><dd id="v-level">1</dd>
+          <dt id="l-clock">Time</dt><dd id="v-clock">0:00.00</dd>
+        </dl>
+      </aside>
+
+      <div class="well-wrap">
+        <canvas id="well" aria-label="Playfield"></canvas>
+        <div id="banner" class="banner" role="status" aria-live="polite"></div>
+      </div>
+
+      <aside class="rail rail-right">
+        <section class="panel" id="next-panel">
+          <h2>Next</h2>
+          <canvas id="next" width="96" height="300" aria-label="Next pieces"></canvas>
+        </section>
+      </aside>
+    </main>
+
+    <div id="touch" class="touch" hidden></div>
+    <div id="overlay" class="overlay" hidden></div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+  <script>
+  // Offline support (fleet SW standard — see sw.js's header). The loopback
+  // guard keeps local-dev edits from being masked by stale cache, matching
+  // the launcher's own behavior. Fire-and-forget with a .catch: inside a
+  // launcher frame the SDK shims navigator.serviceWorker with an inert stub
+  // whose register() rejects.
+  if ('serviceWorker' in navigator &&
+      !/^(127\.|localhost$|0\.0\.0\.0$|::1$)/.test(location.hostname)) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker
+        .register('sw.js', { scope: '/grav-well/' })
+        .catch(function () {}); // offline just won't work; the game still does
+    });
+  }
+  </script>
+</body>
+</html>

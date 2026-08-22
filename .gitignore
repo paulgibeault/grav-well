@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+.vscode/
+.idea/
+*.log
+
+# Launcher-owned scripts, fetched by dev.sh / served by the origin.
+arcade-sdk.js
+arcade-audio.js
+
+# Deploy artifact — staged by CI, never committed.
+dist/
+scratch/
+.arcade-stage/
