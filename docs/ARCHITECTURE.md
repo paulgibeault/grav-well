@@ -198,7 +198,17 @@ State object (read by render/app; **never mutated outside core**):
 }
 ```
 
-Emitted events (append-only per tick, caller calls `g.events.length = 0`):
+Emitted events (append-only per tick). **Two consumers, one drain:** the app
+layer hands the frame's events to the audio layer AND the renderer, then
+clears the array itself — neither consumer may clear it, or the other one
+silently stops receiving events. The order is fixed:
+
+```js
+audio.consume(g);            // cues + bed policy
+renderer.notify(g.events);   // line-clear FX, landing flashes
+g.events.length = 0;         // the app owns the drain
+```
+
 
 ```js
 { type:'move' }                              { type:'rotate', kickIndex }
@@ -221,7 +231,7 @@ into discrete cell moves. The input layer only translates devices into
 export function createRenderer(canvases, opts)
 // canvases: { well, hold, next }
 // opts: { theme, fontScale, reducedMotion, powerSaver }   ← plain values, not Arcade
-// → { draw(g), resize(), setOpts(partial), dispose() }
+// → { draw(g), notify(events), resize(), setOpts(partial), dispose() }
 ```
 
 Layer discipline (§6d): a cached background, an offscreen locked-cell layer
