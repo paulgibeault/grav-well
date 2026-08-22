@@ -11,7 +11,12 @@ import assert from 'node:assert/strict';
 import { MODES, MODE_IDS, DEFAULT_MODE, gameOptsFor } from '../js/app/modes.js';
 
 // The opts keys js/core/game.js's createGame() reads, and nothing else.
-const OPT_KEYS = ['mode', 'seed', 'goalLines', 'timeLimitMs', 'garbageRows'];
+const OPT_KEYS = ['mode', 'seed', 'goalLines', 'timeLimitMs', 'goal', 'garbageRows'];
+
+// The endings a mode can declare. Core checks them in this order on the same
+// tick and emits one `goal` event whichever fires, so a mode declaring two
+// would end on whichever came first.
+const endingsOf = (o) => [o.goalLines, o.timeLimitMs, o.goal].filter((v) => v !== null);
 
 const isCount = (v) => Number.isInteger(v) && v > 0;
 
@@ -30,6 +35,7 @@ test('every mode produces a valid createGame opts object', () => {
         assert.ok(typeof o.seed === 'number' || typeof o.seed === 'string', id + ' seed');
         assert.ok(o.goalLines === null || isCount(o.goalLines), id + ' goalLines');
         assert.ok(o.timeLimitMs === null || isCount(o.timeLimitMs), id + ' timeLimitMs');
+        assert.ok(o.goal === null || o.goal === 'garbage', id + ' goal');
         assert.ok(Number.isInteger(o.garbageRows) && o.garbageRows >= 0, id + ' garbageRows');
         // createGame() treats undefined and null differently in exactly one
         // place — optCount() stores null so the value survives a snapshot's
@@ -38,13 +44,21 @@ test('every mode produces a valid createGame opts object', () => {
     }
 });
 
-test('no mode carries both a line goal and a clock', () => {
-    // Core checks the goal on lock and the clock on tick, so a mode with both
-    // would end on whichever came first — a rule §3 never states and no player
-    // could infer.
+test('no mode declares two endings at once', () => {
+    // A line goal, a clock and a dig all resolve to the same `goal` event, so
+    // a mode carrying two would end on whichever came first — a rule §3 never
+    // states and no player could infer. They compose in core if a timed dig is
+    // ever wanted; no v1 mode asks for one.
     for (const id of MODE_IDS) {
-        const o = gameOptsFor(id, 1);
-        assert.ok(o.goalLines === null || o.timeLimitMs === null, id);
+        assert.ok(endingsOf(gameOptsFor(id, 1)).length <= 1, id);
+    }
+});
+
+test('a mode that can end declares exactly how', () => {
+    // Zen is the only endless one (§3), and that is a design statement, not an
+    // omission — every other mode has to say what finishes it.
+    for (const id of MODE_IDS) {
+        assert.equal(endingsOf(gameOptsFor(id, 1)).length, id === 'zen' ? 0 : 1, id);
     }
 });
 
@@ -93,18 +107,32 @@ test('Zen has neither ending, and the mode id is what disables top-out', () => {
     assert.equal(MODES.zen.record, null);
 });
 
-test('the Daily Well starts buried', () => {
+test('the Daily Well starts buried and ends when it is clean', () => {
     const o = gameOptsFor('daily', 1);
     assert.equal(o.garbageRows, 8, '§3: eight rows of seeded debris');
-    // The dig goal core can express: clear as many lines as there are rows of
-    // debris. See the note on MODES.daily.
-    assert.equal(o.goalLines, 8);
+    // §3 is a DIG. Not a line count: a player can clear line after line well
+    // above the debris, so a goalLines approximation hands out the win with
+    // the bottom of the well still dirty.
+    assert.equal(o.goal, 'garbage');
+    assert.equal(o.goalLines, null);
     assert.equal(o.timeLimitMs, null);
     // §3/§7: one board, keyed by the day, ascending because it is a time race.
     assert.equal(MODES.daily.scores.category, 'daily');
     assert.equal(MODES.daily.scores.order, 'asc');
     assert.equal(MODES.daily.scores.keyed, true);
     assert.equal(MODES.daily.seedSource, 'daily');
+});
+
+test('a dig goal never ships without debris to dig', () => {
+    // The trap this pins: `goal: 'garbage'` on a well with garbageRows 0 is
+    // won the instant createGame() returns, goal event already in the first
+    // drain. The two fields are one setting in two halves.
+    for (const id of MODE_IDS) {
+        const o = gameOptsFor(id, 1);
+        if (o.goal === 'garbage') assert.ok(o.garbageRows > 0, id + ' digs nothing');
+        if (o.garbageRows > 0) assert.equal(o.goal, 'garbage', id + ' buries the player with no way out');
+    }
+    assert.deepEqual(MODE_IDS.filter((id) => gameOptsFor(id, 1).goal === 'garbage'), ['daily']);
 });
 
 test('only the Daily Well seeds from the day', () => {

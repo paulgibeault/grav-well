@@ -7,6 +7,11 @@
  * gets written when a run ends" has exactly one file to read. A second caller
  * anywhere else is a bug even when it works.
  *
+ * The file has two halves: the writes a run produces, and the reads a screen
+ * needs. Both are here for the same reason — js/app/ui.js renders a
+ * leaderboard, a Records panel and a name field without ever holding an
+ * Arcade.scores/records/player call of its own.
+ *
  * Nothing here touches localStorage. Not as a matter of taste — inside a
  * launcher frame the origin is opaque and the property ACCESS ITSELF throws
  * (GAME_INTEGRATION.md §9). Every durable byte goes through the SDK, which
@@ -393,6 +398,121 @@ function dayBefore(dateStr) {
 
 function today(A) {
     return (A.daily && typeof A.daily.dateStr === 'function') ? A.daily.dateStr() : null;
+}
+
+// ---------------------------------------------------------------------------
+// reading it back — the screens' half of the same door
+// ---------------------------------------------------------------------------
+//
+// These exist so that js/app/ui.js can render a leaderboard, a Records panel
+// and a name field WITHOUT calling Arcade.scores / Arcade.records /
+// Arcade.player itself. The single-owner rule at the top of this file is the
+// reason they are here rather than there.
+
+// The SDK keeps the top 100 per category and evicts past that. Reading the
+// whole board is what lets a keyed one (the Daily Well) be filtered down to a
+// single day without the day's slowest entries falling off the end first.
+const SCORES_CAP = 100;
+
+/**
+ * One mode's leaderboard, best first, as plain rows.
+ *
+ * EVERY `name` ON A RETURNED ROW IS OFF-DEVICE AND HOSTILE. Entries arrive
+ * from the player's own paired devices via the launcher's union merge (§4),
+ * which means the string was typed on a machine this one does not control.
+ * Render it with `textContent` or `Arcade.html.escape` — never `innerHTML`,
+ * never a template string interpolated into markup. That is §7b, and it is the
+ * fleet's one shipped-then-fixed bug class, twice. Score names are the ONLY
+ * off-device strings this game has, so this function is the only place the
+ * rule has to hold.
+ *
+ * The Daily Well is scoped to today. One category holds every day's dig, keyed
+ * by date; a board mixing Tuesday's times into Wednesday's is not a
+ * leaderboard, it is a pile. `dateStr` overrides "today" for a UI showing an
+ * earlier day.
+ *
+ * @param {string} modeId
+ * @param {{limit?: number, dateStr?: string}} [opts]
+ * @returns {Array<{rank:number, score:number, name:string, ts:number,
+ *                  key:?string, meta:?object}>} empty for a mode with no board
+ *          (Sprint keeps a record, Zen keeps neither) — never null, so the
+ *          caller can map over it unconditionally.
+ */
+export function loadBoard(modeId, opts) {
+    const A = arcade();
+    const mode = modeFor(modeId);
+    if (!A || !mode.scores) return [];
+    const o = opts || {};
+    const n = Number.isFinite(Number(o.limit)) ? Math.max(0, Math.floor(Number(o.limit))) : 10;
+    if (n === 0) return [];
+
+    const keyed = mode.scores.keyed;
+    // Filter first, THEN take n: slicing to n and filtering after would return
+    // three of today's times because seven of yesterday's were faster.
+    const day = keyed ? (typeof o.dateStr === 'string' ? o.dateStr : today(A)) : null;
+    const raw = A.scores.list(mode.scores.category, { limit: keyed ? SCORES_CAP : n });
+    const rows = keyed ? raw.filter((e) => e && e.key === day) : raw;
+
+    // Rebuilt field by field rather than passed through. The SDK stamps a
+    // hidden `dev`/`eid` on every entry for its cross-device merge and says
+    // not to rely on them; a row that never carries them cannot be relied on.
+    return rows.slice(0, n).map((e, i) => ({
+        rank: i + 1,
+        score: Number(e.score),
+        name: typeof e.name === 'string' ? e.name : '',
+        ts: Number(e.ts) || 0,
+        key: typeof e.key === 'string' ? e.key : null,
+        meta: (e.meta && typeof e.meta === 'object') ? e.meta : null,
+    }));
+}
+
+/**
+ * Every personal best this game has stored, keyed by category — `sprint-40`,
+ * `marathon-score`, `ultra-score` as they exist (an unplayed mode has none).
+ *
+ * Returned as the SDK stores them, because a record is SELF-DESCRIBING by
+ * design: each carries its own `direction`, `format` and `label`, which is
+ * exactly what lets the launcher's Records sheet render any of them with no
+ * per-game code. A UI that reads those three fields instead of switching on
+ * the category name gets a new mode's record for free.
+ *
+ * Nothing here is off-device: records are written only by recordResult().
+ *
+ * @returns {Object<string, {value:number, direction:'higher'|'lower',
+ *                           ts:number, label?:string, format?:string}>}
+ */
+export function loadRecords() {
+    const A = arcade();
+    if (!A || !A.records || typeof A.records.list !== 'function') return {};
+    return A.records.list();
+}
+
+/** The sticky display name, or '' when the player has not set one. It lives at
+ *  arcade.v1.global.playerName — SHARED BY EVERY GAME IN THE FLEET, not ours
+ *  to namespace — which is why the UI should present it as who they are at the
+ *  arcade rather than as a Gravity Well nickname. */
+export function playerName() {
+    const A = arcade();
+    return (A && A.player) ? (A.player.name() || '') : '';
+}
+
+/**
+ * Rename the player, arcade-wide. The SDK trims and clamps to 32 characters,
+ * so the stored name is not always the string handed in — the clamped value is
+ * returned rather than the argument, so a name field can show what was
+ * actually kept instead of silently disagreeing with the leaderboard.
+ *
+ * Past leaderboard entries keep the name they were stamped with; renaming is
+ * not retroactive, and re-stamping old entries would rewrite history on the
+ * player's other devices too.
+ *
+ * @returns {string} the name as stored.
+ */
+export function setPlayerName(s) {
+    const A = arcade();
+    if (!A || !A.player || typeof s !== 'string') return playerName();
+    A.player.setName(s);
+    return A.player.name() || '';
 }
 
 // ---------------------------------------------------------------------------

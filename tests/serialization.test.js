@@ -54,7 +54,7 @@ const hash = (g) => hashU32(JSON.stringify(serialize(g)));
 // non-default settings.
 function busyGame() {
     const g = createGame({
-        seed: 'daily-2026-08-22', mode: 'daily', garbageRows: 6, goalLines: 40,
+        seed: 'daily-2026-08-22', mode: 'daily', garbageRows: 6, goalLines: 40, goal: 'garbage',
         settings: { das: 100, arr: 0, sdf: 7, ghost: false, lockdown: 'infinite' },
     });
     playRange(g, inputLog(555, 120), 0, 420);
@@ -92,6 +92,7 @@ test('the fixture really is busy, so the round trip is not proving nothing', () 
     assert.ok(snap.hold !== null);
     assert.ok(snap.stats.pieces > 0);
     assert.equal(snap.goalLines, 40);
+    assert.equal(snap.goal, 'garbage');
     assert.equal(snap.garbageRows, 6);
     assert.deepEqual(snap.settings, { das: 100, arr: 0, sdf: 7, ghost: false, lockdown: 'infinite' });
 });

@@ -8,8 +8,8 @@
  *
  * A mode is nothing but the opts js/core/game.js already takes, plus the
  * fleet-facing names the finished run is filed under. Core knows about a line
- * goal, a clock and debris; it has never heard of "Sprint 40", and does not
- * need to.
+ * goal, a clock, a dig and debris; it has never heard of "Sprint 40", and does
+ * not need to.
  *
  * THE DAILY SEED IS NOT DERIVED HERE — deriving it needs today's date, and a
  * date is entropy. `Arcade.daily.seed()` owns it (GAME_INTEGRATION.md §7c):
@@ -49,6 +49,7 @@ export const MODES = deepFreeze({
         blurb: 'Fifteen levels, a hundred and fifty lines. The long fall.',
         goalLines: 150,
         timeLimitMs: null,
+        goal: null,
         garbageRows: 0,
         seedSource: 'entropy',
         metric: 'score',
@@ -67,6 +68,7 @@ export const MODES = deepFreeze({
         blurb: 'Forty lines. Nothing else. Go.',
         goalLines: 40,
         timeLimitMs: null,
+        goal: null,
         garbageRows: 0,
         seedSource: 'entropy',
         metric: 'time',
@@ -88,6 +90,7 @@ export const MODES = deepFreeze({
         blurb: 'Three minutes on the clock. Score all you can.',
         goalLines: null,
         timeLimitMs: ULTRA_MS,
+        goal: null,
         garbageRows: 0,
         seedSource: 'entropy',
         metric: 'score',
@@ -106,6 +109,7 @@ export const MODES = deepFreeze({
         blurb: 'Level-one gravity, no clock, no ending. Stack.',
         goalLines: null,
         timeLimitMs: null,
+        goal: null,
         garbageRows: 0,
         seedSource: 'entropy',
         // Nothing to rank and nothing to beat: §3 gives Zen lifetime stats
@@ -119,16 +123,14 @@ export const MODES = deepFreeze({
         id: 'daily',
         name: 'Daily Well',
         blurb: 'One well, one seed, one day. Dig it clear.',
-        /* THE DIG GOAL IS AN APPROXIMATION, and it is the one line of this
-         * table that cannot say what §3 says. §3's Daily Well ends when the
-         * debris is GONE; game.js's only endings are a line count, a clock and
-         * a top-out — there is no "no garbage left on the board" predicate,
-         * and adding one is a core change this layer may not make. Eight rows
-         * of debris under an eight-line goal is the closest the frozen
-         * createGame() contract gets, and it is the conventional dig race
-         * besides. Flagged in the handover rather than smuggled in. */
-        goalLines: DAILY_GARBAGE_ROWS,
+        goalLines: null,
         timeLimitMs: null,
+        /* §3's dig, exactly: the run ends when no debris remains, not after
+         * some number of lines. The two fields below are ONE setting in two
+         * halves and must move together — `goal: 'garbage'` on a mode with
+         * `garbageRows: 0` is won the instant createGame() returns, goal event
+         * already in the first drain. Nothing else in this table carries it. */
+        goal: 'garbage',
         garbageRows: DAILY_GARBAGE_ROWS,
         seedSource: 'daily',
         metric: 'time',
@@ -167,7 +169,8 @@ export const DEFAULT_MODE = 'marathon';
  *                              the run's seed, a factory for one, or the
  *                              generator Arcade.daily.seed() returns.
  * @returns {{mode:string, seed:number|string, goalLines:?number,
- *            timeLimitMs:?number, garbageRows:number}} a fresh object every
+ *            timeLimitMs:?number, goal:?string, garbageRows:number}} a fresh
+ *            object every
  *            call — the caller owns it and may mutate it.
  */
 export function gameOptsFor(modeId, seed) {
@@ -177,6 +180,7 @@ export function gameOptsFor(modeId, seed) {
         seed: resolveSeed(seed),
         goalLines: m.goalLines,
         timeLimitMs: m.timeLimitMs,
+        goal: m.goal,
         garbageRows: m.garbageRows,
     };
 }

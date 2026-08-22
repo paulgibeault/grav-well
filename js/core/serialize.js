@@ -31,7 +31,7 @@ export const SNAPSHOT_VERSION = 1;
 const PLAIN_KEYS = [
     'mode', 'phase', 'seed', 'ghostY', 'hold', 'holdUsed',
     'score', 'lines', 'level', 'combo', 'b2b', 'tick', 'elapsedMs',
-    'goalLines', 'timeLimitMs', 'topOutReason', 'garbageRows',
+    'goalLines', 'timeLimitMs', 'goal', 'topOutReason', 'garbageRows',
     'leftoverMs', 'fallMs', 'lockMs', 'lockResets', 'lowestY', 'lastKickIndex',
     'dir', 'dasMs', 'arrMs',
 ];

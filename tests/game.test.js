@@ -589,6 +589,79 @@ test('Daily Well: one seed gives the same debris AND the same bag to everyone', 
     assert.notDeepEqual(Array.from(a.board), Array.from(tomorrow.board));
 });
 
+// Eight rows of stacked pieces with their gap in column 9, over two rows of
+// debris with THEIRS in column 0. The two columns are the whole point: they
+// make "eight lines cleared" and "the debris is gone" different events, which
+// is what a line count cannot tell apart.
+const DIG_WELL = new Array(8).fill('OOOOOOOOO.').concat(['.GGGGGGGGG', '.GGGGGGGGG']);
+
+// A vertical I hard-dropped down one column. x is the box origin, so the bar
+// itself lands in column x + 2.
+function dropVertical(g, x) {
+    release(g, ACTIONS.HARD);
+    setPiece(g, { type: 'I', rot: 1, x: x, y: 18 });
+    press(g, ACTIONS.HARD);
+}
+
+// garbageRows is 8 so the run is not won before the fixture board is laid
+// down; the board is then replaced wholesale by the fixture.
+const digGame = (opts) => scenario(DIG_WELL, null, Object.assign(
+    { mode: 'daily', goal: 'garbage', garbageRows: 8 }, opts));
+
+test('Daily Well: the dig is won when the last debris cell goes, not before', () => {
+    const g = digGame({ timeLimitMs: 600000 });
+    assert.equal(g.phase, 'playing');
+
+    dropVertical(g, 7);
+    assert.equal(g.lines, 4);
+    assert.equal(g.phase, 'playing');
+
+    dropVertical(g, 7);
+    assert.equal(g.lines, 8, 'eight lines cleared...');
+    assert.equal(g.phase, 'playing', '...and the well is still dirty');
+    assert.equal(events(g, 'goal').length, 0);
+
+    dropVertical(g, -2);        // down the debris' own column, at last
+    assert.equal(g.lines, 10);
+    assert.equal(g.phase, 'won');
+    assert.deepEqual(events(g, 'goal'), [{ type: 'goal' }]);
+    assert.ok(!Array.from(g.board).includes(GARBAGE_ID), 'the well is clean');
+});
+
+test('...which is the thing a line count gets wrong', () => {
+    // The same well, won on lines instead: this is the bug goal:'garbage'
+    // exists to close, pinned so it cannot come back as an approximation.
+    const g = digGame({ goal: null, goalLines: 8 });
+    dropVertical(g, 7);
+    dropVertical(g, 7);
+    assert.equal(g.phase, 'won', 'a line goal fires here');
+    assert.ok(Array.from(g.board).includes(GARBAGE_ID),
+        'with the debris still sitting at the bottom of the well');
+});
+
+test('a dig with nothing to dig is won on the spot', () => {
+    const g = createGame({ seed: 1, mode: 'daily', goal: 'garbage', garbageRows: 0 });
+    assert.equal(g.phase, 'won');
+    assert.deepEqual(g.events, [{ type: 'goal' }]);
+
+    const real = createGame({ seed: 1, mode: 'daily', goal: 'garbage', garbageRows: 8 });
+    assert.equal(real.phase, 'playing');
+    assert.equal(real.events.length, 0);
+
+    // An unrecognised goal is dropped rather than kept: a typo must not make a
+    // run that quietly never ends.
+    assert.equal(createGame({ seed: 1, goal: 'gargage' }).goal, null);
+    assert.equal(createGame({ seed: 1 }).goal, null);
+});
+
+test('a dig under a clock ends whichever way comes first', () => {
+    const g = digGame({ timeLimitMs: 200 });
+    runTicks(g, 13);
+    assert.equal(g.phase, 'won', 'the clock can end an unfinished dig');
+    assert.ok(Array.from(g.board).includes(GARBAGE_ID));
+    assert.deepEqual(events(g, 'goal'), [{ type: 'goal' }], 'and only one goal is announced');
+});
+
 test('the debris is diggable: one hole a row, never twice in the same column', () => {
     const g = createGame({ seed: 7, garbageRows: 8 });
     assert.equal(highestRow(g.board), ROWS - 8);

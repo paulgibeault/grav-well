@@ -80,6 +80,7 @@ export function createGame(opts) {
         tick: 0, elapsedMs: 0,
         goalLines: optCount(o.goalLines),
         timeLimitMs: optCount(o.timeLimitMs),
+        goal: normalizeGoal(o.goal),
         topOutReason: null,
         stats: newStats(),
         events: [],
@@ -181,7 +182,7 @@ function step(g) {
     autoShift(g);
     applyGravity(g);
     tickLockDelay(g);
-    checkClock(g);
+    checkGoals(g);
 }
 
 /* DAS then ARR (§2.8). The one-cell tap belongs to press(); this is only the
@@ -265,17 +266,43 @@ function tickLockDelay(g) {
     if (g.lockMs >= LOCK_DELAY_MS) lockPiece(g);
 }
 
-function checkClock(g) {
-    if (g.phase !== 'playing') return;
-    if (g.timeLimitMs != null && g.elapsedMs >= g.timeLimitMs) reachGoal(g);
+/* Every way a run can be WON, in one place so that they COMPOSE: a timed dig
+ * ends whichever way comes first, and whichever it is emits the same event.
+ *
+ * Called at the end of each tick and again from the lock that resolves a
+ * clear, so a goal met by a line clear lands on the same tick as the piece
+ * that met it rather than one tick behind it. Returns whether the run ended,
+ * which is how lockPiece knows not to spawn into a finished run. */
+function checkGoals(g) {
+    if (g.phase !== 'playing') return false;
+    if (g.goalLines != null && g.lines >= g.goalLines) return reachGoal(g);
+    /* Daily Well (§3) is a DIG: the goal is the debris, not a line count.
+     * Approximating it as goalLines = garbageRows is the bug this exists to
+     * close — cleared lines are not cleared garbage rows, because a player can
+     * clear line after line well above the debris and be handed the win with
+     * the bottom of the well still dirty. */
+    if (g.goal === 'garbage' && !hasGarbage(g.board)) return reachGoal(g);
+    if (g.timeLimitMs != null && g.elapsedMs >= g.timeLimitMs) return reachGoal(g);
+    return false;
+}
+
+function hasGarbage(board) {
+    // Scanned from the floor up, because that is where debris is: while any
+    // remains this returns on one of the first reads, and the single time it
+    // costs a whole pass is the pass that ends the run.
+    for (let i = board.length - 1; i >= 0; i--) {
+        if (board[i] === GARBAGE_ID) return true;
+    }
+    return false;
 }
 
 function reachGoal(g) {
-    // Ultra's clock or Sprint's line goal. The active piece is left where it
-    // is rather than nulled: a frozen final frame reads as an ending, a piece
-    // that vanishes reads as a bug.
+    // Ultra's clock, Sprint's line goal, or Daily's clean well. The active
+    // piece is left where it is rather than nulled: a frozen final frame reads
+    // as an ending, a piece that vanishes reads as a bug.
     g.phase = 'won';
     emit(g, { type: 'goal' });
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -500,7 +527,7 @@ function lockPiece(g) {
         if (g.mode === 'zen') sinkStack(g, () => highestRow(g.board) >= HIDDEN_ROWS);
         else { topOut(g, 'lock'); return; }
     }
-    if (g.goalLines != null && g.lines >= g.goalLines) { reachGoal(g); return; }
+    if (checkGoals(g)) return;      // won: nothing more enters the well
     spawnFromBag(g);
 }
 
@@ -599,6 +626,12 @@ function startRun(g) {
     g.bag = createBag(makeRng(g.seed));
     if (g.garbageRows > 0) seedGarbage(g);
     spawnFromBag(g);
+    // A dig with nothing to dig is already won, and says so at once rather
+    // than leaving the player mining an empty well for a goal that can never
+    // arrive. It is the honest reading of "no debris remains", and it makes a
+    // misconfigured mode (goal: 'garbage' with no garbageRows) loud instead of
+    // unplayable.
+    checkGoals(g);
 }
 
 /* Daily Well debris (§3).
@@ -666,8 +699,15 @@ function numOr(v, dflt, min, max) {
     return n < min ? min : (n > max ? max : n);
 }
 
+/* The goals that are not a number. Validated against a known set rather than
+ * stored as handed over: a typo would otherwise create a run that simply never
+ * ends, which is the hardest kind of mode bug to see. */
+function normalizeGoal(v) {
+    return v === 'garbage' ? 'garbage' : null;
+}
+
 // Absent is null, never undefined: undefined does not survive JSON, and these
-// two are what tell a resumed Sprint or Ultra that it still has a goal.
+// are what tell a resumed Sprint, Ultra or Daily that it still has a goal.
 function optCount(v) {
     if (v == null) return null;
     const n = Math.floor(Number(v));
