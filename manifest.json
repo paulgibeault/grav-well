@@ -3,7 +3,7 @@
   "short_name": "Gravity Well",
   "description": "A faithful falling-block stacker — 7-bag, wall kicks, T-spins, and a daily dig down the well.",
   "scope": "/grav-well/",
-  "start_url": "./index.html?v=0.1.1",
+  "start_url": "./index.html?v=0.1.2",
   "display": "standalone",
   "background_color": "#070B14",
   "theme_color": "#070B14",
