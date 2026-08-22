@@ -15,7 +15,7 @@
  * game.js and the import can stay one-directional.
  */
 
-import { COLS, ROWS } from './constants.js';
+import { COLS, ROWS, ACTIONS } from './constants.js';
 import { createBoard } from './board.js';
 import { createBag } from './bag.js';
 import { makeRng } from '../arcade-rng.js';
@@ -75,7 +75,17 @@ export function deserialize(obj) {
     g.queue = Array.isArray(obj.queue) ? obj.queue.slice() : [];
     g.stats = Object.assign({}, obj.stats);
     g.settings = Object.assign({}, obj.settings);
-    g.held = Object.assign({}, obj.held);
+    // Rebuilt from ACTIONS rather than copied, because press()/release() gate
+    // on the key EXISTING in this map. A snapshot with a partial or missing
+    // `held` — a hand-edited save, an export from another version, a truncated
+    // write — would otherwise restore a game that renders and falls under
+    // gravity while silently refusing every input, which reads as a frozen
+    // game rather than a bad save. serialize() always writes the full map, so
+    // this only ever fires on a snapshot we did not author.
+    g.held = {};
+    for (const action of Object.values(ACTIONS)) {
+        g.held[action] = !!(obj.held && obj.held[action]);
+    }
     g.events = JSON.parse(JSON.stringify(obj.events || []));
     return g;
 }
