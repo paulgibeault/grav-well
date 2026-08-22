@@ -38,7 +38,7 @@ stops being a quarry and rings like a pipe.
 
 | Mode | What it is |
 | ---- | ---------- |
-| **Marathon** | The default. Levels 1–15 over 150 lines, gravity following the guideline curve. An **Endless** toggle keeps going past 15. |
+| **Marathon** | The default. Levels 1–15 over 150 lines, gravity following the guideline curve — fifteen distinct speeds, reaching true 20G territory by the end. |
 | **Sprint 40** | Clear 40 lines as fast as you can. Instant retry. |
 | **Ultra** | Three minutes on the clock. Maximum score. |
 | **Zen** | Level-1 gravity forever, no top-out, no timer. An overflowing well gently sinks rather than ending your run. |
