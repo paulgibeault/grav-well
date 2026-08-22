@@ -1,0 +1,713 @@
+/* well.css — Gravity Well.
+ *
+ * The DOM in index.html is fixed and this file never assumes more of it than
+ * is written there. Everything the canvas renderer needs to know about colour
+ * it reads back out of here with getComputedStyle(document.documentElement),
+ * so the seven piece hues and the shaft colours are declared once, as custom
+ * properties, and only their VALUES change between themes.
+ *
+ * Launcher hooks the SDK stamps on <html> (GAME_INTEGRATION.md §5):
+ *   data-theme="dark|light"      the two palettes below
+ *   data-reduced-motion="true"   SDK kill-switch collapses every animation
+ *   data-handedness="left"       mirrors the button cluster, nothing else
+ *                                (touch.js mirrors it onto #touch as well)
+ *   data-power-saver="true"      --arcade-pulse-count drops to 1; blur goes
+ *   --font-scale                 root font-size; every size here is rem/em
+ *
+ * Hooks this file expects the app layer to set (see the report that shipped
+ * with this file):
+ *   #app[data-danger="true"]     stack over row 16 -> vignette
+ *   #banner[data-kind="record"]  new best -> gold flash, settles gold
+ *   #touch[data-scheme="…"]      "gesture" (default) | "buttons"
+ *
+ * §6d: nothing here loops without end. The two emphasis effects both ride
+ * animation-iteration-count: var(--arcade-pulse-count, 3) as the LONGHAND and
+ * land their 100% stop on the static resting value, so the settle is seamless
+ * and a settled screen produces no frames at all.
+ */
+
+/* ─── Palette ─────────────────────────────────────────────────────────────
+   Dark is the flagship and the default: index.html's theme-color and the
+   manifest background are already the night well, so a standalone first paint
+   before the SDK has stamped [data-theme] must not flash white. */
+:root {
+  --font-scale: 1;
+  color-scheme: dark;
+
+  /* Chrome */
+  --bg-page:   #05070E;
+  --bg-shaft:  #0D1425;   /* the mouth of the shaft, lit from above */
+  --panel:     rgba(19, 27, 48, 0.72);
+  --rule:      rgba(126, 160, 220, 0.22);
+  --fg:        #E8EEF8;
+  --fg-dim:    #9AA8C4;
+  --accent:    #F0C46A;   /* lantern gold — records, score, focus rings */
+  --danger:    #FF6B6B;
+  --scrim:     rgba(4, 6, 12, 0.74);
+  --shadow:    rgba(0, 0, 0, 0.55);
+  --glow:      rgba(126, 190, 255, 0.35);
+  --band:      rgba(4, 7, 16, 0.72);   /* keeps the banner legible over the stack */
+
+  /* The well itself. These seven and the --p-* set below are deliberately
+     referenced by NO rule in this file — js/render/* pulls them off <html>
+     with getComputedStyle and paints them onto the canvas, which is the only
+     way a canvas game can have one palette instead of two. Renaming one is a
+     breaking change for the renderer, not a tidy-up. */
+  --well-field: #0B1120;
+  --well-wall:  #161E33;  /* the stone ring */
+  --well-rim:   rgba(126, 160, 220, 0.30);
+  --well-grid:  rgba(126, 160, 220, 0.09);
+  --star:       #DCE6FF;
+  --star-dim:   rgba(220, 230, 255, 0.35);
+  --ghost:      rgba(200, 216, 255, 0.22);
+  --garbage:    #4A5570;  /* seeded debris (GARBAGE_ID) — deliberately hueless */
+  --danger-veil: rgba(255, 68, 68, 0.55);
+  --danger-rim:  rgba(255, 107, 107, 0.75);
+
+  /* The seven. Genre-convention hues, pushed bright enough to glow against
+     the night field: every one clears 6:1 on --well-field (min is J at 6.0). */
+  --p-i: #3FE0F0;
+  --p-o: #F6C945;
+  --p-t: #B57BFF;
+  --p-s: #4BE08A;
+  --p-z: #FF6B6B;
+  --p-j: #5A8DFF;
+  --p-l: #FF9A48;
+}
+
+/* Dawn well. Same seven hues by name, taken down into the shade so they read
+   as salvage against a pale sky instead of glowing out of it: every one
+   clears 4.6:1 on --well-field (min is I at 4.60). */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-page:   #F4EFE6;
+  --bg-shaft:  #E3D9C9;
+  --panel:     rgba(255, 252, 246, 0.82);
+  --rule:      rgba(92, 72, 48, 0.24);
+  --fg:        #2B2A33;
+  --fg-dim:    #57545F;
+  --accent:    #7A4E12;
+  --danger:    #A8210F;
+  --scrim:     rgba(244, 239, 230, 0.80);
+  --shadow:    rgba(74, 58, 38, 0.28);
+  --glow:      rgba(150, 116, 66, 0.28);
+  --band:      rgba(250, 246, 238, 0.80);
+
+  --well-field: #DCD3C6;
+  --well-wall:  #C6B9A5;
+  --well-rim:   rgba(92, 72, 48, 0.38);
+  --well-grid:  rgba(92, 72, 48, 0.12);
+  --star:       #6E7EA0;   /* dawn stars: the last few, fading, not glowing */
+  --star-dim:   rgba(110, 126, 160, 0.35);
+  --ghost:      rgba(60, 50, 40, 0.20);
+  --garbage:    #8C8375;
+  --danger-veil: rgba(150, 26, 12, 0.55);
+  --danger-rim:  rgba(168, 33, 15, 0.75);
+
+  --p-i: #0B6472;
+  --p-o: #6B5000;
+  --p-t: #5B34A6;
+  --p-s: #14663C;
+  --p-z: #B01F10;
+  --p-j: #23479F;
+  --p-l: #983F06;
+}
+
+/* Only for the sliver of time before Arcade.init() stamps [data-theme], and
+   for anyone opening the Pages URL with no SDK at all. Scoped so an explicit
+   dark choice always wins. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg-page: #F4EFE6;
+    --bg-shaft: #E3D9C9;
+    --fg: #2B2A33;
+    --fg-dim: #57545F;
+  }
+}
+
+/* ─── Reset & page ────────────────────────────────────────────────────────*/
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Belt and braces with the SDK's own injected rule — this file has to be
+   right when the game is opened standalone too. Both declarations resolve
+   against the browser default, so they agree rather than compound. */
+html { font-size: calc(100% * var(--font-scale, 1)); }
+
+html, body {
+  block-size: 100%;
+  overflow: hidden;
+  /* A downward flick is a hard drop, not a pull-to-refresh. */
+  overscroll-behavior: none;
+}
+
+body {
+  background:
+    radial-gradient(130% 85% at 50% -12%, var(--bg-shaft), transparent 68%),
+    var(--bg-page);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.35;
+  touch-action: manipulation;
+  /* iOS: no long-press callout, no loupe, no grey tap flash. Nothing here is
+     text a player wants to select mid-drop. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The UA rule is display:none, which any display: we set would override. */
+[hidden] { display: none !important; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── Shell ───────────────────────────────────────────────────────────────
+   dvh, not vh: on mobile Safari vh is the tallest the viewport ever gets, so
+   a vh-sized column hides its own bottom row behind the URL bar. vh first as
+   the fallback for anything that has never heard of dvh. Inside the launcher
+   iframe both resolve to the frame's own height, which is the point. */
+#app {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  block-size: 100vh;
+  block-size: 100dvh;
+  overflow: hidden;
+  padding:
+    max(0.5rem, env(safe-area-inset-top))
+    max(0.5rem, env(safe-area-inset-right))
+    max(0.5rem, env(safe-area-inset-bottom))
+    max(0.5rem, env(safe-area-inset-left));
+}
+
+/* Phone portrait is the base case, not the fallback: hold + readout ride in a
+   strip across the top with the next queue beside them, and the well takes
+   every pixel that is left. min-height:0 on the well row is what lets it
+   actually shrink instead of pushing the strip off-screen. */
+#stage {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "hud  next"
+    "well well";
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+.rail-left  { grid-area: hud; flex-direction: row; flex-wrap: wrap; align-items: stretch; }
+.rail-right { grid-area: next; align-self: start; inline-size: min(36vw, 10rem); }
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: 0.35rem 0.4rem 0.45rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.5rem;
+  background: var(--panel);
+}
+
+.panel h2 {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+#hold-panel { flex: 0 0 auto; inline-size: 4.5rem; }
+#next-panel { flex: 1 1 auto; overflow: hidden; }
+
+/* The preview canvases letterbox rather than stretch, so a renderer that has
+   not yet re-measured after a reflow degrades to "smaller", never "wrong".
+   The BOX ASPECT is the contract for which way the queue is laid out: wide in
+   the top strip (previews left-to-right), tall in the side rail (top-down).
+   render/*'s resize() should read this element's client box, not the width /
+   height attributes in index.html. */
+#hold, #next {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  object-fit: contain;
+}
+#hold { aspect-ratio: 4 / 3; }
+#next { aspect-ratio: 5 / 2; max-block-size: 100%; }
+
+/* In the top strip there is width to spare, so the readout is a table: label
+   left, value right, tabular figures so a rolling score never reflows the
+   column. The side rail is ~9rem wide and cannot hold both on one line — see
+   the stacked variant in the side-rail block below. */
+#readout {
+  flex: 1 1 9rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 0.6rem;
+  align-content: center;
+  min-inline-size: 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.5rem;
+  background: var(--panel);
+}
+#readout dt {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  align-self: center;
+}
+#readout dd {
+  font-size: 0.95rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+#v-score { color: var(--accent); }
+
+/* ─── The well ────────────────────────────────────────────────────────────*/
+.well-wrap {
+  grid-area: well;
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+  isolation: isolate;
+  /* Makes this box a size query container so #well can be sized from BOTH of
+     its axes at once — see below. Safe here because the wrap's own size comes
+     entirely from the grid track, never from its contents. */
+  container-type: size;
+}
+
+/* 10 x 20 visible cells, fitted to the wrap without ever distorting.
+   `aspect-ratio` alone is not enough and neither is `height: 100%`: measured in
+   Chromium across a phone portrait, a phone landscape, a laptop and a 404x410
+   iframe, both fall back to the canvas's intrinsic 300px width in exactly the
+   cases where the box is wide and short — the landscape phone. Sizing the
+   block axis against the container in both dimensions is the one form that
+   fits all four: as tall as the wrap, but never taller than twice its width.
+   max-*: 100% and the wrap's overflow: hidden are the safety net for anything
+   that does not understand container units. If the renderer sets explicit
+   inline sizes, those win and all of this is inert. */
+#well {
+  display: block;
+  aspect-ratio: 1 / 2;
+  inline-size: auto;
+  block-size: min(100cqh, 200cqw);
+  max-inline-size: 100%;
+  max-block-size: 100%;
+  border-radius: 0.3rem;
+  background: var(--well-field);
+  box-shadow:
+    0 0 0 1px var(--well-rim),
+    0 1rem 2.5rem -0.5rem var(--shadow);
+  touch-action: none;
+}
+
+/* Danger vignette. Dark from the floor up, because the thing that is wrong is
+   that the stack has reached the light. */
+.well-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 0.35rem;
+  background: radial-gradient(76% 60% at 50% 50%,
+              transparent 42%, var(--danger-veil) 100%);
+  opacity: 0;
+}
+
+/* Stack over row 16. The pulse is finite and settles at 0.5 — the same tint,
+   held, plus a red rim on the well that never moved. Opacity only: the
+   compositor can run this without waking the main thread. */
+#app[data-danger="true"] .well-wrap::after,
+.well-wrap[data-danger="true"]::after {
+  opacity: 0.55;
+  animation-name: danger-swell;
+  animation-duration: 1.1s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: var(--arcade-pulse-count, 3);
+}
+#app[data-danger="true"] #well,
+.well-wrap[data-danger="true"] #well { --well-rim: var(--danger-rim); }
+
+@keyframes danger-swell {
+  0%   { opacity: 0.3; }
+  50%  { opacity: 1; }
+  100% { opacity: 0.55; }  /* == the resting value, so the last pulse just stops */
+}
+
+/* ─── Banner ──────────────────────────────────────────────────────────────
+   Absolutely centred by insets rather than a translate, so the emphasis
+   animations own transform outright. */
+#banner {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 27%;
+  z-index: 2;
+  pointer-events: none;
+  padding: 0.45rem 0.5rem;
+  /* A static band, not a box: over a full stack the text alone loses. */
+  background: radial-gradient(62% 100% at 50% 50%, var(--band), transparent 78%);
+  font-size: 1.2rem;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-align: center;
+  text-wrap: balance;
+  text-shadow: 0 0 0.7rem var(--glow);
+}
+/* Nothing to announce, nothing on screen — no class for the app to remember
+   to remove, and setting textContent = '' is a complete teardown. */
+#banner:empty { opacity: 0; }
+#banner:not(:empty) {
+  animation-name: banner-in;
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
+  animation-iteration-count: 1;
+}
+
+/* Top-out and other bad news. Static: nothing about a dead run is urgent. */
+#banner[data-kind="alert"] { color: var(--danger); }
+
+/* New record. Entry runs once, the flash rides the token; when it stops the
+   text is still gold, which is the part that carries the meaning. */
+#banner[data-kind="record"] {
+  color: var(--accent);
+  animation-name: banner-in, record-flash;
+  animation-duration: 260ms, 820ms;
+  animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1), ease-in-out;
+  animation-delay: 0s, 260ms;
+  animation-iteration-count: 1, var(--arcade-pulse-count, 3);
+}
+
+@keyframes banner-in {
+  from { opacity: 0; transform: translateY(0.6rem) scale(0.94); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes record-flash {
+  0%, 100% { opacity: 1;    transform: none; }
+  50%      { opacity: 0.45; transform: scale(1.07); }
+}
+
+/* ─── Controls ────────────────────────────────────────────────────────────
+   Gesture-first, one Pointer Events handler for a thumb and a trackpad alike.
+   The hooks below are what js/input/touch.js actually emits:
+
+     #touch[data-scheme="gesture"|"buttons"]     which scheme is live
+     #touch[data-handedness="left"|"right"]      which thumb gets the actions
+       .touch-gesture                            the transparent drag surface
+       .touch-cluster
+         .touch-pad[data-pad="move"|"action"]
+           .touch-btn[data-act="LEFT"|…]
+             .touch-glyph
+
+   The inactive scheme's subtree carries [hidden]. Every display: rule here is
+   scoped under an attribute selector for that reason, and the global
+   [hidden] { display: none !important } near the top of this file is the
+   backstop — a bare `.touch-cluster { display: grid }` outranks [hidden] and
+   would resurrect the cluster on top of the gesture surface. */
+#touch {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  touch-action: none;
+  container-name: touchbox;
+  overscroll-behavior: none;
+  background: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#touch:not([data-scheme="buttons"]) { container-type: size; }
+
+/* touch-action: none is the single most load-bearing declaration in this file:
+   without it the browser claims every drag for scrolling and pull-to-refresh
+   before the game sees a pointermove. The insets matter just as much — this
+   element is empty, so with no bounds it is zero pixels tall, no pointer ever
+   reaches it, and the game reads as dead rather than as unstyled. */
+.touch-gesture {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  /* touch.js's cellPx() fallback is surface.clientWidth / 10 — it takes this
+     element's width to BE the width of the ten columns. A full-bleed surface
+     therefore reports a 140px "cell" on a laptop against a real 44px one, and
+     every gesture threshold is measured in cells. The well is as tall as its
+     wrap and half as wide, so half the container's height is exactly the well's
+     width: measured, this lands on the nose at 1440x900 and 844x390 and within
+     3% on a 390px phone, where the well is nearly full width anyway. The app
+     layer can still hand over the true value with setOpts({ cellPx }); this is
+     what the fallback is worth without it. */
+  /* 100cqh is #touch's full height; the well only gets what the top strip
+     leaves it, so subtract the chrome before halving. Measured against the
+     real layout this lands within ~1% at 390x844 and 420x520. The clamp floor
+     is the safety rail: on an absurdly short viewport the subtraction could go
+     negative, and a zero-width surface is a game that silently ignores every
+     gesture. */
+  inline-size: clamp(4rem, calc((100cqh - 7rem) / 2), 100%);
+  margin-inline: auto;         /* left:0 + right:0 + auto margins = centred */
+  touch-action: none;
+  pointer-events: auto;
+  background: transparent;
+}
+
+/* Any affordance drawn on the gesture surface — a first-run hint, a drag
+   shadow — is scenery, and must never swallow the gesture underneath it. The
+   surface itself is explicitly not scenery. */
+#touch:not([data-scheme="buttons"]) > *:not(.touch-gesture) { pointer-events: none; }
+
+#touch .touch-hint, #touch .hint {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 8%;
+  z-index: 1;
+  pointer-events: none;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+}
+
+/* Secondary scheme: the accessibility path, for players who cannot hold a
+   precise drag. Back into the column flow, docked under the stage, so it takes
+   real space instead of covering the well. */
+#touch[data-scheme="buttons"] {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  flex: 0 0 auto;
+}
+#touch[data-scheme="buttons"] .touch-cluster {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+#touch[data-scheme="buttons"] .touch-pad {
+  display: grid;
+  gap: 0.5rem;
+}
+#touch[data-scheme="buttons"] .touch-pad[data-pad="move"]   { grid-template-columns: repeat(3, auto); }
+#touch[data-scheme="buttons"] .touch-pad[data-pad="action"] { grid-template-columns: repeat(2, auto); }
+
+/* Mirror the whole cluster, and only the cluster: reversing the two pads swaps
+   which thumb gets movement and which gets rotation, while leaving the order
+   inside each pad alone so "left" is still the leftmost button. The attribute
+   lands on #touch itself; the descendant form covers the SDK's copy on <html>
+   in case the app layer never mirrors it down. */
+#touch[data-handedness="left"] .touch-cluster,
+[data-handedness="left"] #touch[data-scheme="buttons"] .touch-cluster {
+  flex-direction: row-reverse;
+}
+
+#touch[data-scheme="buttons"] .touch-btn {
+  /* Never below 44 CSS px, and larger when the player has scaled type up.
+     This is the accessibility scheme; it is the one that has to be hittable. */
+  min-inline-size: max(3rem, 44px);
+  min-block-size: max(3rem, 44px);
+  display: grid;
+  place-items: center;
+  padding: 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.7rem;
+  background: var(--panel);
+  color: var(--fg);
+  font: inherit;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#touch[data-scheme="buttons"] .touch-glyph {
+  display: block;
+  font-size: 1.15rem;
+  line-height: 1;
+  pointer-events: none;   /* the press target is the button, not the glyph */
+}
+#touch[data-scheme="buttons"] .touch-btn:active,
+#touch[data-scheme="buttons"] .touch-btn[aria-pressed="true"] {
+  transform: scale(0.94);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ─── Overlay ─────────────────────────────────────────────────────────────
+   Menus, pause, settings, game over. Last child of #app, so it stacks over
+   the gesture surface and takes the pointer events with it. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+/* Whatever the app screens put in here get a card and a vertical rhythm for
+   free, so a pause panel and a game-over panel do not each invent one. */
+.overlay > * {
+  inline-size: min(28rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 1.25rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.9rem;
+  background: var(--panel);
+  box-shadow: 0 1rem 3rem -1rem var(--shadow);
+}
+
+.overlay h1 { font-size: 1.85rem; letter-spacing: 0.02em; }
+.overlay h2 { font-size: 1.15rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dim); }
+.overlay p  { font-size: 0.95rem; color: var(--fg-dim); }
+.overlay dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 1rem;
+  font-size: 0.95rem;
+}
+.overlay dt { color: var(--fg-dim); }
+.overlay dd { text-align: end; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.overlay button {
+  inline-size: 100%;
+  min-block-size: max(2.75rem, 44px);
+  padding: 0.7rem 1.1rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.6rem;
+  background: var(--panel);
+  color: var(--fg);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.overlay button[data-primary], .overlay button.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.overlay button:active { transform: scale(0.98); }
+
+/* A phone has no hover, so every hover state is an enhancement and nothing
+   is ever hover-only. */
+@media (hover: hover) {
+  .overlay button:hover { border-color: var(--accent); }
+  #touch[data-scheme="buttons"] .touch-btn:hover { border-color: var(--accent); }
+}
+
+/* ─── Laptop, desktop, and phone landscape ────────────────────────────────
+   46em ≈ 736px: wide enough that side rails cost the well nothing. A phone
+   held sideways lands here too, which is right — width is what side rails
+   need, and the short-viewport block below takes care of the height. */
+@media (min-width: 46em) {
+  #app { gap: 0.6rem; padding: max(0.75rem, env(safe-area-inset-top))
+                              max(0.75rem, env(safe-area-inset-right))
+                              max(0.75rem, env(safe-area-inset-bottom))
+                              max(0.75rem, env(safe-area-inset-left)); }
+
+  #stage {
+    gap: 0.75rem;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "hud well next";
+  }
+
+  /* No top strip in this layout — only #app's own padding stands between the
+     container height and the well's. Exact at 1440x900 and 844x390. */
+  .touch-gesture { inline-size: clamp(4rem, calc((100cqh - 1.5rem) / 2), 100%); }
+
+  .rail { inline-size: clamp(5.5rem, 13vw, 11rem); }
+  .rail-left { flex-direction: column; }
+  .rail-right { align-self: stretch; inline-size: clamp(5.5rem, 13vw, 11rem); }
+
+  #hold-panel { inline-size: auto; }
+  #hold { aspect-ratio: 4 / 3; }
+  #next { aspect-ratio: 8 / 25; }   /* the queue stands up again: 5 previews, top-down */
+
+  /* Stacked, one column: at 9rem "SCORE" and "128,400" do not fit side by
+     side, and the two-column form silently ellipsised every label down to
+     "SC…". The value is the thing worth the width. */
+  #readout {
+    flex: 0 0 auto;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0.5rem 0.6rem;
+  }
+  .rail-left { flex-wrap: nowrap; }
+  #readout dt { font-size: 0.7rem; }
+  #readout dd { font-size: 1.25rem; text-align: start; margin-block-end: 0.5rem; }
+  #readout dd:last-of-type { margin-block-end: 0; }
+
+  #banner { font-size: 1.6rem; }
+  .panel h2 { font-size: 0.68rem; }
+}
+
+/* Short viewport — a phone in landscape, or a very short launcher iframe.
+   The chrome gives up its padding first; the well is the last thing to
+   shrink and it is never allowed to overflow into a scroll. */
+@media (max-height: 34em) {
+  #app { gap: 0.35rem; }
+  #stage { gap: 0.4rem; }
+  .panel { padding: 0.25rem 0.3rem 0.3rem; gap: 0.15rem; }
+  .panel h2 { font-size: 0.58rem; letter-spacing: 0.1em; }
+  #readout { padding: 0.2rem 0.4rem; }
+  #readout dt { font-size: 0.6rem; }
+  #readout dd { font-size: 0.9rem; margin-block-end: 0.25rem; }
+  #banner { font-size: 1.1rem; inset-block-start: 8%; }
+}
+
+/* Narrow the SIDE rails only. The same rule applied to the top strip squeezed
+   the next queue down to a 60x24 sliver on a 420x520 iframe. */
+@media (min-width: 46em) and (max-height: 34em) {
+  .rail, .rail-right { inline-size: clamp(4.5rem, 11vw, 7rem); }
+}
+
+/* ─── Settings that turn things off ───────────────────────────────────────*/
+
+/* Power saver: the blur is the one thing here with a continuous GPU cost. */
+:root[data-power-saver="true"] .overlay {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--bg-page);
+}
+
+/* The SDK ships this kill switch for framed play; declaring it here is what
+   makes the standalone Pages URL behave the same way. Gate B allows a bare 1. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001s !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+  }
+}
