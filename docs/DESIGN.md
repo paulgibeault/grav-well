@@ -501,7 +501,7 @@ grav-well/
 │   │   ├── gravity.js  score.js  game.js  serialize.js
 │   ├── render/                 # layers, fx, hud
 │   ├── input/                  # keyboard das/arr, touch cluster
-│   ├── audio.js                # cue wiring & bed retune policy
+│   ├── app/audio.js            # cue wiring & bed retune policy
 │   └── soundpack.js            # registered pack — design only
 ├── tests/                      # §9 suite
 ├── tools/

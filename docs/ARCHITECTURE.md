@@ -271,7 +271,21 @@ export function attachTouch(root, handlers, opts)   // opts: { handedness, schem
 // → { detach(), setOpts(partial) }
 ```
 
-Neither module imports `js/core/game.js`; they speak `ACTIONS` only.
+Neither module imports `js/core/game.js`. They speak `ACTIONS`, plus `COLS`
+(touch only, to turn surface width into a cell width) and a `COMMANDS`
+vocabulary of their own for PAUSE/RETRY — those are app-layer concerns and
+must never reach core's `press()`.
+
+`attachTouch`'s `opts` also accepts an optional `cellPx`; the renderer knows
+the true cell size, and without it touch measures the surface itself.
+
+**Gestures are the primary scheme** (decided 2026-08-22; DESIGN.md §4). A
+horizontal drag is POSITIONAL — the piece tracks the finger via
+`Math.round(dx / cell)` — which means a single frame can deliver several
+complete `press`/`release` pairs. `js/core/game.js` must apply each one, and
+must apply the first shift synchronously inside `press()`. Coalescing them
+per tick loses cells on a fast drag and presents as input latency rather than
+as a bug.
 
 ## js/app/*
 

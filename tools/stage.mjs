@@ -28,10 +28,16 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 // The audition diagnostic and its config, the frozen chiptune archive kept as
 // provenance, the SVG sources the art was drawn from, and the licence text.
 export const PRECACHE_EXCLUDE = [
-  // Published as provenance/legal text, deliberately not part of the offline
-  // shell. verify-artifact.mjs fails the build on any published file that is
-  // neither precached nor named here, so an omission is a decision, not an
-  // oversight.
+  // Published, deliberately not part of the offline shell. verify-artifact.mjs
+  // fails the build on any published file that is neither precached nor named
+  // here, so an omission is a decision someone wrote down rather than one
+  // nobody noticed.
+  //
+  // The sound-pack audition timeline and its config are a design diagnostic —
+  // they ship so the pack can be re-auditioned from the published site, but no
+  // player ever needs them offline.
+  "audio/audition.js",
+  "soundpack.config.json",
   "LICENSE",
 ];
 

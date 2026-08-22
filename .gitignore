@@ -12,3 +12,4 @@ arcade-audio.js
 dist/
 scratch/
 .arcade-stage/
+audio/out/
