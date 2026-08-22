@@ -117,12 +117,26 @@ refill lazily so a 5-deep preview spanning a bag boundary works.
 ```js
 export const LOCK_DELAY_MS = 500;
 export const MAX_LOCK_RESETS = 15;
+export const MAX_G = 20;                // rows per tick at the 20G floor
 export function fallIntervalMs(level)   // guideline curve: (0.8 - (n-1)*0.007)^(n-1) seconds
 export function levelFor(lines)         // 1 + floor(lines / 10)
 ```
 
-`fallIntervalMs` clamps to a floor of `TICK_MS` (20G) so high levels can't
-produce sub-tick intervals.
+**Gravity above 1G is real, and this is the trap.** `1G` is one row per tick;
+`20G` is TWENTY rows per tick. An earlier draft of this contract floored the
+interval at `TICK_MS` and called that 20G — it is 1G, and it quietly capped a
+game that advertises faithfulness, making levels 14 and 15 identical (the
+curve crosses one-row-per-tick at level 14).
+
+So: `fallIntervalMs` floors at `TICK_MS / MAX_G` (0.833 ms) — the actual 20G
+— and every level 1..15 in DESIGN.md §2.6 is therefore observable directly
+through it. The curve reaches true 20G on its own at **level 19**, which is
+where a guideline stacker should reach it.
+
+The corollary binds `js/core/game.js`: when the interval is shorter than a
+tick, one tick drops **several rows**, so gravity is `floor(accumulated /
+interval)` rows per tick and not a boolean "did it move". Cap the per-tick row
+count at `MAX_G` so a pathological interval cannot spin.
 
 ## js/core/tspin.js
 
@@ -140,8 +154,14 @@ when the last action was not a rotation.
 ```js
 export function scoreLock({ lines, tspin, perfectClear, level, combo, b2b })
 // → { points, b2b: nextB2bFlag, label: 'QUAD' | 'T-SPIN DOUBLE' | … | null }
-export function dropPoints(cells, kind)   // kind: 'soft' | 'hard' → flat points
+export function dropPoints(rows, kind)    // kind: 'soft' | 'hard' → flat points, level-independent
 ```
+
+`scoreLock` returns the next B2B flag but deliberately NOT a next combo: the
+caller owns the combo counter, and the `combo` passed IN is the count of
+*prior* consecutive clearing locks (so the first clear of a chain adds 0).
+The asymmetry is real — B2B has a rule the score function can evaluate alone,
+a combo is just a caller-side tally.
 
 Values are exactly the table in issue #1 §2.9. B2B multiplies the clear award
 by 1.5 and applies to Quads and any T-spin **clear**; a plain Single/Double/

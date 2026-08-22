@@ -187,8 +187,14 @@ t(n) = (0.8 − (n − 1) × 0.007) ^ (n − 1)
 | s/row | 1.000 | 0.793 | 0.618 | 0.355 | 0.135 | 0.064 | 0.028 | 0.007 |
 
 - Level advances every **10 lines** (fixed goal). Marathon runs levels 1–15
-  (150 lines); an **Endless** toggle continues the curve past 15, clamped to
-  20G (instant drop) once reached.
+  (150 lines); an **Endless** toggle continues the curve past 15.
+- **Gravity above 1G is real.** `1G` is one row per tick; `20G` is twenty rows
+  per tick. The curve crosses 1G at level **14**, so from there a single tick
+  drops several rows — `floor(accumulated / interval)`, capped at 20 — and the
+  interval floors at `TICK_MS / 20` (0.833 ms), which the curve reaches on its
+  own at level **19**. Flooring at one row per tick instead would cap the game
+  at 1G and make levels 14 and 15 identical; an early draft of the contract did
+  exactly that, which is why it is spelled out here.
 - **Soft drop:** 20× current gravity by default (SDF configurable, up to
   instant). **Hard drop:** teleports to the ghost position and locks
   immediately.
