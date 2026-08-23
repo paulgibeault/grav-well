@@ -85,6 +85,21 @@ function settingsDefaults() {
         lockdown: 'extended',               // §2.7
         glyphs: false,                      // §2.2 — colour is never the only channel
         scheme: 'gesture',                  // §4 — gestures are the primary scheme
+        /* §4 — how hard the flick-down has to be to read as a hard drop.
+         * 1 is js/input/touch.js's shipped thresholds; higher is easier to
+         * trigger. ONE number rather than the three thresholds it scales,
+         * because the three only ever move together and a stored blob with
+         * three independent knobs in it is three ways for a hand-edited save
+         * to make the gesture unreachable. touch.js falls back to its own
+         * defaults for anything out of range. */
+        flick: 1,
+        /* §4 — which way a plain TAP on the gesture surface turns the piece.
+         * 'cw' is what the game shipped with, and it stays the default:
+         * flipping this for an existing player would silently rewrite their
+         * muscle memory. The two-finger tap always takes the OTHER direction,
+         * so there is exactly one value here and no way to store a pair that
+         * disagrees with itself (js/input/touch.js, rotationPair). */
+        tapRotate: 'cw',
         bed: true,                          // §6 — the sustained well-hum
         /* §4, keyed on event.code. ONLY THE PLAYER'S OVERRIDES ARE STORED —
          * js/input/keymap.js owns DEFAULT_KEYMAP and merges a stored map over

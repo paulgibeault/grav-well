@@ -44,21 +44,44 @@ test('every mode produces a valid createGame opts object', () => {
     }
 });
 
-test('no mode declares two endings at once', () => {
+test('a mode declares AT MOST ONE ending', () => {
     // A line goal, a clock and a dig all resolve to the same `goal` event, so
     // a mode carrying two would end on whichever came first — a rule §3 never
     // states and no player could infer. They compose in core if a timed dig is
     // ever wanted; no v1 mode asks for one.
+    //
+    // This used to read "…and a mode that can end declares exactly how",
+    // with Zen carved out as the single exception. Marathon losing its line
+    // goal (§3, amended 2026-08-22) makes that carve-out wrong, and the honest
+    // repair is to WIDEN the invariant rather than to drop it: zero declared
+    // endings is a legitimate mode, because a run always has one ending core
+    // provides for free — the top-out. So the rule is `<= 1`, and the modes
+    // sitting at 0 are pinned by name in the next test rather than waved
+    // through by an `if`.
     for (const id of MODE_IDS) {
         assert.ok(endingsOf(gameOptsFor(id, 1)).length <= 1, id);
     }
 });
 
-test('a mode that can end declares exactly how', () => {
-    // Zen is the only endless one (§3), and that is a design statement, not an
-    // omission — every other mode has to say what finishes it.
+test('the modes with no declared ending are exactly the two that end on top-out', () => {
+    // Zero endings is a design statement, not a forgotten field, and it is
+    // true of EXACTLY two modes — so the set is named here. Anything else
+    // reaching zero is a mode that lost its goal by accident and would run
+    // forever with no way to finish.
+    //
+    //   Marathon — the standard endless game: levels climb with no finish
+    //              line, and the run is over when the stack tops out.
+    //   Zen      — endless AND unloseable: js/core/game.js softens both
+    //              top-out paths on `g.mode === 'zen'`, so the well sinks
+    //              instead. It is the one mode where "ends on top-out" is
+    //              not literally true, which is why it is called out here.
+    //
+    // Everything else has to say what finishes it, or a player cannot know.
+    const endless = MODE_IDS.filter((id) => endingsOf(gameOptsFor(id, 1)).length === 0);
+    assert.deepEqual(endless, ['marathon', 'zen']);
     for (const id of MODE_IDS) {
-        assert.equal(endingsOf(gameOptsFor(id, 1)).length, id === 'zen' ? 0 : 1, id);
+        if (endless.includes(id)) continue;
+        assert.equal(endingsOf(gameOptsFor(id, 1)).length, 1, id + ' must declare its ending');
     }
 });
 
@@ -84,13 +107,25 @@ test('Ultra is a clock with no line goal', () => {
     assert.equal(MODES.ultra.record.direction, 'higher');
 });
 
-test('Marathon is 150 lines and a score board', () => {
+test('Marathon is the endless standard game on a score board', () => {
     const o = gameOptsFor('marathon', 1);
-    assert.equal(o.goalLines, 150, '§2.6: levels 1–15, ten lines each');
+    // §3, amended 2026-08-22: no finish line. It shipped as 150 lines with a
+    // deferred "Endless" toggle; the toggle is gone and the goal with it,
+    // because the standard game IS the endless one and a mode does not need a
+    // setting to say so.
+    assert.equal(o.goalLines, null, '§3: no line goal — the run ends on a top-out');
     assert.equal(o.timeLimitMs, null);
+    assert.equal(o.goal, null);
+    assert.equal(o.garbageRows, 0);
+    // Nothing about how the run is FILED changed. js/app/store.js gates on
+    // `won` only for a time metric, so a score-metric mode that ends on a
+    // top-out has always counted — which is what lets the goal go without
+    // touching store.js.
+    assert.equal(MODES.marathon.metric, 'score');
     assert.equal(MODES.marathon.scores.category, 'marathon');
     assert.equal(MODES.marathon.scores.order, 'desc');
     assert.equal(MODES.marathon.record.category, 'marathon-score');
+    assert.equal(MODES.marathon.record.direction, 'higher');
 });
 
 test('Zen has neither ending, and the mode id is what disables top-out', () => {

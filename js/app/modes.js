@@ -46,8 +46,26 @@ export const MODES = deepFreeze({
     marathon: {
         id: 'marathon',
         name: 'Marathon',
-        blurb: 'Fifteen levels, a hundred and fifty lines. The long fall.',
-        goalLines: 150,
+        blurb: 'The standard game. The levels keep climbing. Play until the well wins.',
+        /* NO LINE GOAL, and that is the mode (§3, amended 2026-08-22).
+         *
+         * Marathon shipped stopping at 150 lines / level 15, with an "Endless"
+         * toggle deferred out of v1 because nothing could read it. The
+         * resolution is not to revive the toggle: Marathon simply has no
+         * finish line, so there is no setting to read and no second mode to
+         * name. The run ends on a top-out, like the standard game it is
+         * supposed to be.
+         *
+         * Nothing else in this entry moves. `metric: 'score'` still files
+         * every finished run, because js/app/store.js only gates on `won` for
+         * a TIME metric — a Marathon that ended on a top-out has always been a
+         * score worth filing, which is exactly why removing the goal costs the
+         * leaderboard nothing.
+         *
+         * js/core/gravity.js carries the other half: levelFor() keeps
+         * advancing every ten lines forever and the curve rides down to the
+         * true 20G floor at level 19 and STAYS there. */
+        goalLines: null,
         timeLimitMs: null,
         goal: null,
         garbageRows: 0,

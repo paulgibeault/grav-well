@@ -267,8 +267,9 @@ export function attachKeyboard(target, handlers, keymap)
 // → detach()
 
 // js/input/touch.js
-export function attachTouch(root, handlers, opts)   // opts: { handedness, scheme }
+export function attachTouch(root, handlers, opts)   // opts: { handedness, scheme, flick, tapRotate }
 // → { detach(), setOpts(partial) }
+export function rotationPair(tapRotate)            // → { tap, alt }, always opposites
 ```
 
 Neither module imports `js/core/game.js`. They speak `ACTIONS`, plus `COLS`
@@ -278,6 +279,31 @@ must never reach core's `press()`.
 
 `attachTouch`'s `opts` also accepts an optional `cellPx`; the renderer knows
 the true cell size, and without it touch measures the surface itself.
+
+**The flick-down thresholds are settable, on purpose.** How hard a flick has to
+be before it reads as a hard drop is a question about a thumb and a screen, and
+it shipped wrong once — judged from a smoothed trailing velocity that a
+100 ms gesture cannot charge, so the drop was reported as "hard to trigger" on
+a real phone. `opts` therefore carries `flick` (the player-facing sensitivity
+multiplier, 0.4–3, `1` = the module's defaults) and the three raw thresholds it
+scales — `flickSpeed`, `flickMin`, `flickDrop` — plus `flickWindowMs`. All are
+live through `setOpts()`, so a tuning pass costs no code change. `js/app/store.js`
+carries `flick` in the settings schema and `js/main.js` pushes it; the raw
+three exist for a bisect on a device, not for the settings screen. An
+out-of-range value falls back to the default rather than clamping — a
+`flickSpeed` of 0 would hard-drop every downward gesture.
+
+**Which way a TAP rotates is the player's, and the two gestures are derived
+together.** `opts.tapRotate` (`'cw'` | `'ccw'`, default `'cw'`) names the
+direction a one-finger tap turns the piece; the secondary gesture — two-finger
+tap, or mouse button 2 — always takes the OTHER one. That is why `rotationPair`
+exists and is exported rather than being two settings or two constants: a
+configuration where both gestures rotate the same way would silently cost the
+player counter-rotation, so it is made unrepresentable and pinned by
+`tests/touch.test.js`, which can import it with no DOM. Live through
+`setOpts()`. **The keyboard is deliberately outside this** — ↑/X = CW and
+Z/Ctrl = CCW is the genre standard and `js/input/keymap.js` already remaps it;
+the toggle exists because a tap has no label on it to read.
 
 **Gestures are the primary scheme** (decided 2026-08-22; DESIGN.md §4). A
 horizontal drag is POSITIONAL — the piece tracks the finger via

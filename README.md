@@ -38,7 +38,7 @@ stops being a quarry and rings like a pipe.
 
 | Mode | What it is |
 | ---- | ---------- |
-| **Marathon** | The default. Levels 1–15 over 150 lines, gravity following the guideline curve — fifteen distinct speeds, reaching true 20G territory by the end. |
+| **Marathon** | The default, and the standard endless game. No finish line: levels advance every 10 lines for as long as you last, gravity following the guideline curve down to true 20G at level 19 and pinned there. You play until you top out. |
 | **Sprint 40** | Clear 40 lines as fast as you can. Instant retry. |
 | **Ultra** | Three minutes on the clock. Maximum score. |
 | **Zen** | Level-1 gravity forever, no top-out, no timer. An overflowing well gently sinks rather than ending your run. |
@@ -55,10 +55,10 @@ work.
 | Gesture | Action |
 | --- | --- |
 | Drag sideways | Move — the piece tracks your finger cell-for-cell |
-| Tap | Rotate clockwise |
-| Two-finger tap *(or right-click)* | Rotate counter-clockwise |
-| Flick down | Hard drop |
-| Drag down slowly | Soft drop |
+| Tap | Rotate clockwise — or counter-clockwise, if you flip it in settings |
+| Two-finger tap *(or right-click)* | Rotate the other way, whichever way that is |
+| Flick down | Hard drop — or any downward drag of about four cells or more, however slow |
+| Drag down a little | Soft drop, held until you lift or pull back up |
 | Swipe up | Hold |
 
 **Keyboard:** ←/→ move · ↓ soft drop · **Space** hard drop · ↑ or **X** rotate
@@ -67,7 +67,12 @@ CW · **Z** or Ctrl rotate CCW · **C** or Shift hold · **P**/Esc pause ·
 work unchanged.
 
 An on-screen **button cluster** is available in settings as an accessibility
-scheme, with handedness mirroring.
+scheme, with handedness mirroring. Two gesture settings are yours rather than
+ours, because both are questions about a thumb: **Flick sensitivity**, if the
+swipe-down drop does not catch for you, and **Tap rotation**, if tapping turns
+the piece the opposite way from the one you expect. Flipping the tap always
+flips the two-finger tap with it, so you never lose the other direction. The
+keyboard is unaffected — ↑/X and Z/Ctrl stay CW and CCW, and stay remappable.
 
 ## Features
 

@@ -66,11 +66,12 @@ const TITLE_MS = 1000;
 /* The player's own settings, as this file needs them. js/app/store.js owns the
  * stored shape and its defaults; these are the floor under a read that came
  * back empty, partial, or hand-edited, so a missing field is never `undefined`
- * three call frames from here. `endless` is deliberately absent — it is
- * deferred out of v1 and there is no setting behind it. */
+ * three call frames from here. `endless` is deliberately absent, and now
+ * permanently so: Marathon has no line goal at all (§3), so there is nothing
+ * left for such a setting to switch. */
 const FALLBACK_SETTINGS = {
     das: 167, arr: 33, sdf: 20, ghost: true, lockdown: 'extended',
-    scheme: 'gesture', bed: true, keymap: null,
+    scheme: 'gesture', bed: true, flick: 1, tapRotate: 'cw', keymap: null,
 };
 
 /* Every call into js/app/store.js goes through here.
@@ -130,6 +131,14 @@ async function boot() {
         s.ghost = s.ghost !== false;
         s.bed = s.bed !== false;
         s.scheme = s.scheme === 'buttons' ? 'buttons' : 'gesture';
+        // §4 flick sensitivity. The range is js/input/touch.js's, restated
+        // because the settings slider is drawn from these bounds too — and
+        // because touch.js DISCARDS an out-of-range value rather than clamping
+        // it, so a blob that got past here would silently keep the defaults.
+        s.flick = clamp(s.flick, 0.4, 3, FALLBACK_SETTINGS.flick);
+        // §4 — tap rotation direction. Two legal values and no third meaning,
+        // so an unknown one is the default rather than a throw.
+        s.tapRotate = s.tapRotate === 'ccw' ? 'ccw' : 'cw';
         if (s.lockdown !== 'classic' && s.lockdown !== 'infinite') s.lockdown = 'extended';
         return s;
     }
@@ -184,7 +193,10 @@ async function boot() {
     const touch = attachTouch(touchRoot, {
         press: onPress,
         release: onRelease,
-    }, { scheme: settings.scheme, handedness: arc.handedness });
+    }, {
+        scheme: settings.scheme, handedness: arc.handedness,
+        flick: settings.flick, tapRotate: settings.tapRotate,
+    });
 
     let detachKeys = attachKeyboard(window, {
         press: onPress,
@@ -588,6 +600,8 @@ async function boot() {
 
         if (CORE_KEYS.has(key)) applyCoreSettings();
         if (key === 'scheme') touch.setOpts({ scheme: settings.scheme });
+        if (key === 'flick') touch.setOpts({ flick: settings.flick });
+        if (key === 'tapRotate') touch.setOpts({ tapRotate: settings.tapRotate });
         if (key === 'bed') audio.setOpts({ bedEnabled: settings.bed });
         if (key === 'ghost') kick();
     }
@@ -601,6 +615,8 @@ async function boot() {
         merged.ghost = merged.ghost !== false;
         merged.bed = merged.bed !== false;
         merged.scheme = merged.scheme === 'buttons' ? 'buttons' : 'gesture';
+        merged.flick = clamp(merged.flick, 0.4, 3, FALLBACK_SETTINGS.flick);
+        merged.tapRotate = merged.tapRotate === 'ccw' ? 'ccw' : 'cw';
         if (merged.lockdown !== 'classic' && merged.lockdown !== 'infinite') merged.lockdown = 'extended';
         return merged;
     }
@@ -867,7 +883,9 @@ async function boot() {
         settings = readSettings();
         keymap = sanitizeKeymap(settings.keymap);
         reattachKeyboard();
-        touch.setOpts({ scheme: settings.scheme });
+        touch.setOpts({
+            scheme: settings.scheme, flick: settings.flick, tapRotate: settings.tapRotate,
+        });
         audio.setOpts({ bedEnabled: settings.bed });
         applyCoreSettings();
         if (screen === 'settings') showSettings();

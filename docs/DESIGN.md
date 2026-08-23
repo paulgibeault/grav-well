@@ -3,7 +3,12 @@
      are recorded as comments on issue #1 with their rationale.
 
      Amended 2026-08-22: §4 rewritten gesture-first, with phone/laptop parity
-     as an acceptance criterion (issue #1 open question 3, resolved). -->
+     as an acceptance criterion (issue #1 open question 3, resolved).
+
+     Amended 2026-08-22 (playtest): Marathon has NO line goal — it is the
+     standard endless game. §2.6 and §3 updated; open question 3 (the Endless
+     cap) resolved and moved down to Resolved, and the deferred-toggle note it
+     hung off is gone with it. -->
 
 # Gravity Well — design document
 
@@ -186,11 +191,20 @@ t(n) = (0.8 − (n − 1) × 0.007) ^ (n − 1)
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | s/row | 1.000 | 0.793 | 0.618 | 0.355 | 0.135 | 0.064 | 0.028 | 0.007 |
 
-- Level advances every **10 lines** (fixed goal). Marathon runs levels 1–15
-  (150 lines). An **Endless** continuation past 15 is **deferred out of v1**:
-  it hangs off open question 3 below, which is unresolved, and a toggle no
-  code can read is worse than an absent feature. The gravity curve already
-  supports it — only the goal and the setting are missing.
+- Level advances every **10 lines** (fixed goal), **and never stops**.
+  Marathon has no line goal: the level keeps climbing until the player tops
+  out, which is what makes it the standard endless game (§3). Level 15 is not
+  a finish line, just the last level the table above bothers to print.
+- **Past level 19 every level is the same speed**, because the curve has
+  already reached the 20G floor and there is nowhere further down to go. That
+  is a clamp on the *level*, not on the result: the raw curve's base
+  `0.8 − (n−1)×0.007` goes negative at level 115 and passes −1 at level 259,
+  after which `base^(n−1)` explodes — negative on odd exponents (which a
+  floor comparison catches) and **positive on even ones** (which it does not).
+  Left unclamped, level 259 computes 4.7 seconds per row and level 1001
+  overflows to `Infinity`: gravity getting slower the longer you survive, and
+  finally a piece that never falls. Only the parity of the player's level
+  stood between a three-hour well and a frozen one.
 - **Gravity above 1G is real.** `1G` is one row per tick; `20G` is twenty rows
   per tick. The curve crosses 1G at level **14**, so from there a single tick
   drops several rows — `floor(accumulated / interval)`, capped at 20 — and the
@@ -269,7 +283,7 @@ seed + input log, and the entire core is unit-testable under `node --test`.
 
 | Mode | Rules | Persistence |
 | --- | --- | --- |
-| **Marathon** | Levels 1–15 / 150 lines; Endless toggle continues the curve. The default mode. | leaderboard `marathon`, record `marathon-score`, resumable run snapshot |
+| **Marathon** | **The standard endless game, and the default mode.** No line goal and no finish line: levels advance every 10 lines forever, gravity rides the §2.6 curve down to true 20G at level 19 and stays there, and the run ends when the well tops out. (It shipped as levels 1–15 / 150 lines with a deferred "Endless" toggle; the playtest verdict was that Marathon *is* the endless game, so the goal came out and the toggle was never revived — there is no setting, because there is nothing left to switch.) | leaderboard `marathon`, record `marathon-score`, resumable run snapshot |
 | **Sprint 40** | Clear 40 lines fastest. Instant retry on `R`. | record `sprint-40` (`duration-ms`, lower-is-better) |
 | **Ultra** | 3:00 on the clock, max score. | leaderboard `ultra`, record `ultra-score` |
 | **Zen** | Level-1 gravity forever, no top-out (an overflowing well gently sinks the bottom rows away), untimed. | lines/session stats only, resumable |
@@ -301,10 +315,11 @@ repeat rate silently overrides the tuned DAS/ARR differently on every machine.
 | Gesture | Action |
 | --- | --- |
 | Horizontal drag | Move. **Positional, not repeat-based** — the piece tracks the finger cell-for-cell from cumulative displacement off the pointer-down origin, carrying the remainder so a slow drag never drops a cell. |
-| Tap | Rotate CW |
-| Two-finger tap | Rotate CCW |
-| Flick down | Hard drop |
-| Slow drag down | Soft drop (held until the gesture ends or reverses) |
+| Tap | Rotate — CW by default, CCW if the player flips `tapRotate` (§8) |
+| Two-finger tap | Rotate the OTHER way, always: the pair is derived from one setting, never stored as two, so the two gestures can never end up agreeing |
+| Flick down | Hard drop. Judged ONCE, at lift, from the PEAK downward speed over the last 120 ms rather than a smoothed average — a 100 ms gesture cannot charge an average, which is why the first cut of this shipped effectively unreachable. |
+| Long drag down | Hard drop as well, past ~4 cells, at any speed: nothing else a gesture that long could mean, and losing it to soft-drop-only was half the complaint. Reading the displacement AT LIFT means pulling back up past the soft-drop release point still cancels it. |
+| Short drag down | Soft drop (held until the gesture ends or reverses) |
 | Swipe up | Hold |
 
 The whole difficulty is disambiguation — tap vs drag vs flick, and never
@@ -318,6 +333,22 @@ Three details decide whether this works on a real phone at all:
 drag for scroll or pull-to-refresh), `setPointerCapture` so a drag that leaves
 the canvas keeps tracking, and treating `pointercancel` as a full abort that
 releases every held action (a missed one leaves soft drop stuck down).
+
+**Tap rotation direction is a setting** (`tapRotate`, §8), added 2026-08-22
+after a playtest: rotation "seems backwards to what I expect". The core is
+correct — a T spawns nub-up and a CW turn puts the nub right — so this is
+preference, not a bug, and the answer is to let the player choose rather than
+to move the ruleset. Default `'cw'`, which is what shipped, so no existing
+player's muscle memory changes without them asking. The KEYBOARD is untouched:
+↑/X = CW and Z/Ctrl = CCW is the genre standard and is already remappable; a
+tap is the gesture with no label on it, which is why it is the one that needs
+the toggle.
+
+**Flick sensitivity is a setting**, stored as one multiplier over the module's
+defaults (`settings.flick`, §8) and scaling all three flick thresholds
+together. How hard a flick has to be is a property of a thumb and a screen, not
+of the game, and it shipped wrong once; the raw thresholds are also settable
+through `attachTouch`'s opts so a device can be bisected without a build.
 
 **Button cluster — the secondary scheme.** Real `<button>` elements with
 aria-labels, selectable in settings: an accessibility path for players who
@@ -449,7 +480,7 @@ All under `arcade.v1.grav-well.*` via the SDK:
 
 | Key | Contents | Flags |
 | --- | --- | --- |
-| `settings` | DAS/ARR/SDF, ghost, glyph mode, key map, touch scheme, bed on/off, lockdown mode | `sync: true` |
+| `settings` | DAS/ARR/SDF, ghost, glyph mode, key map, touch scheme, flick sensitivity, tap rotation direction, bed on/off, lockdown mode | `sync: true` |
 | `run.<mode>` | Mid-run snapshot: board, active piece + rotation state, bag `rng.getState()`, queue, hold, score/lines/level/combo/B2B, elapsed, reset budget | `sync: true` |
 | `stats` (via `Arcade.stats`, category `core`) | gamesPlayed & per-mode counts, total lines/pieces, quads, tspins, perfect clears, max combo, play time, daily streak | — |
 | replay/telemetry buffers (M4) | input logs | `exportable: false` |
@@ -559,11 +590,15 @@ contract fits turn-paced garbage exchange well), replay capture & theater
    stackers use. Preference?
 2. **Daily Well format** — seeded 8-row dig-race (spec) vs a seeded Ultra.
    Dig differentiates days more, Ultra is simpler. Both?
-3. **Endless cap** — deferred out of v1 (see §2.6). When it lands: clamp at
-   20G, or hard-stop Marathon at 15 and keep Endless a separate toggle? The
-   curve reaches true 20G at level 19 on its own, which argues for letting it
-   run rather than clamping early.
 
 **Resolved.** *Touch default* — **gesture-first**, decided 2026-08-22. Both
 input paths stay live at once on every device (§4); the button cluster remains
 as the accessibility scheme rather than the default.
+
+**Resolved.** *Endless cap* — decided 2026-08-22 from the shipped build. The
+question was "clamp at 20G, or hard-stop Marathon at 15 and keep Endless a
+separate toggle?", and the answer is **neither half of the either/or**:
+Marathon simply has no line goal, so there is no Endless mode to toggle and
+nothing to name it with. The curve is let run — it reaches true 20G at level
+19 on its own — and the only clamp is the one that keeps it *at* 20G rather
+than letting the formula explode past level 259 (§2.6).
