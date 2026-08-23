@@ -48,6 +48,17 @@
   --glow:      rgba(126, 190, 255, 0.35);
   --band:      rgba(4, 7, 16, 0.72);   /* keeps the banner legible over the stack */
 
+  /* The menu, which is a place rather than a panel (see "The menu" below).
+     --menu-sky is the daylight falling in at the rim, --menu-deep is the
+     bottom of the shaft that light never reaches, and the two of them are
+     the whole depth effect. --menu-hair is a rule quiet enough to separate
+     five rows without ruling them into a table. */
+  --menu-sky:   rgba(46, 66, 112, 0.60);
+  --menu-deep:  rgba(0, 0, 0, 0.72);
+  --menu-hair:  rgba(126, 160, 220, 0.13);
+  --menu-plate: rgba(22, 31, 56, 0.62);
+  --menu-edge:  rgba(154, 190, 250, 0.52);   /* the lit edge of the shaft wall */
+
   /* The well itself. These seven and the --p-* set below are deliberately
      referenced by NO rule in this file — js/render/* pulls them off <html>
      with getComputedStyle and paints them onto the canvas, which is the only
@@ -94,6 +105,14 @@
   --glow:      rgba(150, 116, 66, 0.28);
   --band:      rgba(250, 246, 238, 0.80);
 
+  /* Dawn at the top of the shaft, stone shadow at the bottom — the same two
+     tokens doing the same job, in the other direction. */
+  --menu-sky:   rgba(255, 250, 240, 0.90);
+  --menu-deep:  rgba(64, 48, 30, 0.34);
+  --menu-hair:  rgba(92, 72, 48, 0.17);
+  --menu-plate: rgba(255, 252, 246, 0.70);
+  --menu-edge:  rgba(92, 72, 48, 0.50);
+
   --well-field: #DCD3C6;
   --well-wall:  #C6B9A5;
   --well-rim:   rgba(92, 72, 48, 0.38);
@@ -124,6 +143,12 @@
     --bg-shaft: #E3D9C9;
     --fg: #2B2A33;
     --fg-dim: #57545F;
+    --star: #6E7EA0;
+    --menu-sky: rgba(255, 250, 240, 0.90);
+    --menu-deep: rgba(64, 48, 30, 0.34);
+    --menu-hair: rgba(92, 72, 48, 0.17);
+    --menu-plate: rgba(255, 252, 246, 0.70);
+    --menu-edge: rgba(92, 72, 48, 0.50);
   }
 }
 
@@ -575,8 +600,11 @@ body {
   backdrop-filter: blur(6px);
 }
 /* Whatever the app screens put in here get a card and a vertical rhythm for
-   free, so a pause panel and a game-over panel do not each invent one. */
-.overlay > * {
+   free, so a pause panel and a game-over panel do not each invent one. The
+   menu is the one screen that is not a card — it is the whole viewport, and
+   the block at the foot of this file builds it — so it opts out here rather
+   than spending twenty declarations unwinding this one. */
+.overlay > :not(.menu) {
   inline-size: min(28rem, 100%);
   display: flex;
   flex-direction: column;
@@ -600,6 +628,12 @@ body {
 .overlay dt { color: var(--fg-dim); }
 .overlay dd { text-align: end; font-variant-numeric: tabular-nums; font-weight: 600; }
 
+/* Range thumbs, checkboxes and the radios behind the segmented control all
+   take their colour from the UA's default accent, which is a blue that comes
+   from nowhere in this palette. One declaration puts them on lantern gold in
+   both themes. */
+.overlay input { accent-color: var(--accent); }
+
 .overlay button {
   inline-size: 100%;
   min-block-size: max(2.75rem, 44px);
@@ -619,10 +653,108 @@ body {
 }
 .overlay button:active { transform: scale(0.98); }
 
+/* ─── Settings controls ───────────────────────────────────────────────────
+   The rows built by js/app/ui.js's fieldRow() are label-and-control on one
+   line, which is right for a select or a checkbox. The two gesture settings
+   are not that shape: one is a slider whose ends need naming and one is a
+   choice between two directions that should be shown rather than described,
+   so both get a block of their own. */
+
+.set-field, .seg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border: 0;
+  min-inline-size: 0;
+}
+.set-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.set-label {
+  font-size: 0.9rem;
+  color: var(--fg-dim);
+}
+/* The live reading of the slider, in words. See flickControl() in
+   js/app/ui.js: the stored value is a multiplier and nobody knows what 1.8
+   means, so the number never reaches the screen. */
+.set-value {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fg);
+  text-align: end;
+}
+.set-range { inline-size: 100%; min-block-size: max(1.75rem, 28px); }
+.set-ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+}
+.overlay p.set-note {
+  font-size: 0.78rem;
+  color: var(--fg-dim);
+}
+
+/* Two directions, shown. Real radios under their own labels: arrow keys move
+   between them for free, the label is the 44px target, and the focus ring
+   lands where the browser thinks focus is. The inputs are taken out of flow
+   rather than display:none'd, because a display:none radio is not focusable
+   and the keyboard would lose the control entirely. */
+.seg {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+.seg-input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.seg-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  min-block-size: max(3.25rem, 52px);
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.6rem;
+  background: var(--panel);
+  color: var(--fg-dim);
+  text-align: center;
+  cursor: pointer;
+}
+.seg-glyph {
+  font-size: 1.45rem;
+  line-height: 1;
+}
+.seg-text {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.seg-input:checked + .seg-opt {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.seg-input:focus-visible + .seg-opt {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.seg-opt:active { transform: scale(0.98); }
+
 /* A phone has no hover, so every hover state is an enhancement and nothing
    is ever hover-only. */
 @media (hover: hover) {
   .overlay button:hover { border-color: var(--accent); }
+  .seg-opt:hover { border-color: var(--accent); }
   #touch[data-scheme="buttons"] .touch-btn:hover { border-color: var(--accent); }
 }
 
@@ -690,6 +822,535 @@ body {
    the next queue down to a 60x24 sliver on a 420x520 iframe. */
 @media (min-width: 46em) and (max-height: 34em) {
   .rail, .rail-right { inline-size: clamp(4.5rem, 11vw, 7rem); }
+}
+
+/* ─── The menu ────────────────────────────────────────────────────────────
+
+   The menu is the first thing anyone sees of a game about depth, and the one
+   it shipped with ignored that completely: a 28rem dialog centred on a blurred
+   playfield, five identically-sized buttons, and a receipt of numbers under
+   them. Nothing about it said "well". This block makes the screen the place
+   instead — light coming in at the rim, stars down the shaft, the bottom of
+   the frame falling away into the dark — and lets js/app/ui.js's structure
+   hang inside it.
+
+   THE STAGE IS HIDDEN, NOT BLURRED. A backdrop-filter over the HUD left a
+   smear of half-legible score labels behind the card: a continuous GPU cost
+   to composite, and noise besides. There is nothing behind this screen worth
+   looking at, because this screen is the thing to look at.
+
+   Everything below is scoped under #app[data-screen="menu"]: that attribute is
+   the screen contract js/app/ui.js already drives, so the pause, results and
+   settings cards are untouched by any of it. */
+
+#app[data-screen="menu"] #stage { visibility: hidden; }
+
+#app[data-screen="menu"] #overlay {
+  padding: max(0.9rem, env(safe-area-inset-top))
+           max(1rem, env(safe-area-inset-right))
+           max(0.9rem, env(safe-area-inset-bottom))
+           max(1rem, env(safe-area-inset-left));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  /* A size container, so the tiers at the foot of this block can be asked in
+     `em` and get an answer that MOVES WITH THE FONT SCALE. A media query
+     cannot: its `em` is the browser's initial font size by definition, so at
+     fontScale 1.5 every word on this screen is half again as tall and not one
+     media query has noticed. Everything about what to drop when it stops
+     fitting is therefore a container query; the one thing that is genuinely
+     about the shape of the screen — landscape turning the composition on its
+     side — stays a media query, because that decision should not change when
+     somebody makes the text bigger. */
+  container-type: size;
+  container-name: menu;
+  /* Centred, but never at the cost of reaching the top of the content: unsafe
+     centring puts the overflow half above the scroll origin, where no gesture
+     can get at it. `safe` keeps the ends reachable, and a browser without it
+     falls back to the plain centring on the line above. */
+  align-content: center;
+  align-content: safe center;
+  overflow-y: auto;
+  /* Two gradients and a colour ARE the depth: the mouth of the shaft is lit
+     from somewhere above the top edge, and the light gives out before it
+     reaches the bottom of the frame. Everything else here is decoration on
+     top of those two. */
+  background:
+    radial-gradient(128% 56% at 50% -10%, var(--menu-sky), transparent 68%),
+    linear-gradient(180deg, transparent 26%, var(--menu-deep) 100%),
+    var(--bg-page);
+}
+/* Room to fall. On a tall screen the column is nudged above centre so there
+   is more shaft under it than sky over it, which is the only arrangement a
+   well can honestly have. */
+@media (min-height: 46em) {
+  #app[data-screen="menu"] #overlay { padding-block-end: 9vh; }
+}
+
+/* The starfield, three tiled layers at deliberately incommensurate sizes so
+   the lattice never resolves into a grid, masked down at the edges so the
+   density falls off the way a real one does. Static: DESIGN.md §5 lets the
+   canvas starfield drift only while the play loop is already running, and the
+   menu parks the loop, so a menu that animated its own stars would be the one
+   thing on screen asking for frames. A browser without mask-image just gets
+   stars all the way to the corners. */
+#app[data-screen="menu"] #overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, var(--star) 0 1.1px, transparent 1.8px),
+    radial-gradient(circle, var(--star-dim) 0 1px, transparent 1.5px),
+    radial-gradient(circle, var(--star-dim) 0 0.8px, transparent 1.3px);
+  background-size: 619px 457px, 179px 149px, 127px 103px;
+  background-position: 61px 29px, 19px 71px, 83px 37px;
+  opacity: 0.6;
+  -webkit-mask-image: radial-gradient(ellipse 92% 76% at 50% 26%, #000 20%, transparent 92%);
+  mask-image: radial-gradient(ellipse 92% 76% at 50% 26%, #000 20%, transparent 92%);
+}
+:root[data-theme="light"] #app[data-screen="menu"] #overlay::before { opacity: 0.5; }
+
+/* ── the column ───────────────────────────────────────────────────────── */
+
+#app[data-screen="menu"] .menu {
+  position: relative;
+  inline-size: min(33rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.85rem, 2.6vh, 1.7rem);
+}
+
+/* The shaft walls. A rectangle clipped to a trapezoid that narrows as it
+   descends, so its two long edges lean towards each other — the cheapest
+   honest way to say "this goes away from you". The fill gradient is bright at
+   the box's extreme left and right, and the clip is what makes those bright
+   edges slant; because the percentages are of the BOX and not of the
+   trapezoid, the edges also fade as they narrow, which is exactly what should
+   happen to a wall receding into the dark. */
+#app[data-screen="menu"] .menu::before {
+  content: "";
+  position: absolute;
+  inset: clamp(-4.5rem, -8vh, -2rem) 0 clamp(-5rem, -9vh, -2rem);
+  z-index: -1;
+  pointer-events: none;
+  clip-path: polygon(0 0, 100% 0, 93.5% 100%, 6.5% 100%);
+  /* Edges only, no fill. A filled trapezoid is a slab; two lines that lean
+     towards each other are a shaft. They are faded in at the top and out at
+     the bottom so the wall arrives out of the dark and goes back into it
+     rather than starting and stopping on a hard horizontal rule. */
+  background:
+    linear-gradient(90deg, var(--menu-edge) 0, transparent 3.5%,
+                           transparent 96.5%, var(--menu-edge) 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 15%, #000 55%, transparent 96%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 15%, #000 55%, transparent 96%);
+}
+/* Wide enough to stand the walls off the content instead of running them
+   along its edge — and wide enough that the outset itself still lands on
+   screen. Below this the column already IS the width of the viewport. */
+@media (min-width: 40em) {
+  #app[data-screen="menu"] .menu::before { inset-inline: -1.6rem; }
+}
+
+/* ── the rim ──────────────────────────────────────────────────────────── */
+
+#app[data-screen="menu"] .menu-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+}
+
+/* Wide tracking, light weight, uppercase: an observatory plate, not an arcade
+   marquee. The size is capped in rem so the launcher's font-scale still moves
+   it, and floored well below the phone width so it never wraps mid-word. */
+#app[data-screen="menu"] .wordmark {
+  font-size: clamp(1.35rem, 5.6vw, 2.45rem);
+  font-weight: 400;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;              /* the tracking is trailing; re-centre it */
+  text-transform: uppercase;
+  line-height: 1.1;
+  color: var(--fg);
+}
+
+#app[data-screen="menu"] .tagline {
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+  color: var(--fg-dim);
+}
+
+/* ── the modes ────────────────────────────────────────────────────────── */
+
+#app[data-screen="menu"] .modes {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.55rem, 1.6vh, 1rem);
+}
+
+#app[data-screen="menu"] .mode-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+/* The mode's own piece hue, declared once here and inherited by the mark, the
+   plate and the focus treatment, so the menu and the well agree on what
+   colour Sprint is without js/app/ui.js ever naming one. An id with no rule
+   falls through to the dim default rather than to nothing. */
+#app[data-screen="menu"] .mode { --hue: var(--fg-dim); }
+#app[data-screen="menu"] .mode[data-mode="marathon"] { --hue: var(--p-t); }
+#app[data-screen="menu"] .mode[data-mode="sprint"]   { --hue: var(--p-i); }
+#app[data-screen="menu"] .mode[data-mode="ultra"]    { --hue: var(--p-l); }
+#app[data-screen="menu"] .mode[data-mode="zen"]      { --hue: var(--p-s); }
+#app[data-screen="menu"] .mode[data-mode="daily"]    { --hue: var(--p-j); }
+
+#app[data-screen="menu"] .mode {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.85rem;
+  min-block-size: max(2.75rem, 44px);
+  /* The same inline padding as the hero plate, so the marks line up in one
+     column, the names start on one edge and the figures end on one edge. A
+     13px stagger between the hero and the four under it is the kind of thing
+     nobody names and everybody sees. */
+  padding: 0.55rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+/* THE HERO. One mode is the default and the menu should say so before anyone
+   reads a word of it: it gets the plate, the size, the glow and the whole
+   blurb, and the other four get a line each. Five equal buttons is a form. */
+#app[data-screen="menu"] .mode-hero {
+  grid-template-areas:
+    "mark name  meta"
+    "mark blurb meta";
+  row-gap: 0.15rem;
+  padding: 0.9rem 1rem;
+  border-color: var(--rule);
+  border-radius: 0.7rem;
+  background-color: var(--menu-plate);
+  box-shadow: 0 0.6rem 2rem -0.9rem var(--shadow);
+}
+/* The hue leaks out of the piece and onto the plate. Declared as
+   background-image on its own so that a browser without color-mix drops the
+   glow and keeps the plate, rather than losing both to one invalid
+   shorthand. */
+#app[data-screen="menu"] .mode-hero {
+  background-image:
+    radial-gradient(11rem 7rem at 1.9rem 50%,
+      color-mix(in oklab, var(--hue) 15%, transparent), transparent 72%);
+}
+/* Progressive enhancement: a browser that cannot mix colours keeps --rule,
+   which is what the declaration above already put there. */
+#app[data-screen="menu"] .mode-hero {
+  border-color: color-mix(in oklab, var(--hue) 40%, var(--rule));
+}
+#app[data-screen="menu"] .mode-hero .mark      { grid-area: mark; }
+#app[data-screen="menu"] .mode-hero .mode-text { display: contents; }
+#app[data-screen="menu"] .mode-hero .mode-name { grid-area: name; align-self: end; }
+#app[data-screen="menu"] .mode-hero .mode-blurb,
+#app[data-screen="menu"] .mode-hero .mode-state { grid-area: blurb; align-self: start; }
+#app[data-screen="menu"] .mode-hero .mode-meta { grid-area: meta; }
+
+/* The four that are not the hero: hairline-separated, no boxes. A rule is
+   enough to group them and costs none of the quiet. */
+#app[data-screen="menu"] .modes-rest {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.1rem, 0.7vh, 0.5rem);
+  padding-block-start: clamp(0.1rem, 0.8vh, 0.6rem);
+}
+
+/* ── the marks ────────────────────────────────────────────────────────── */
+
+#app[data-screen="menu"] .mark {
+  flex: 0 0 auto;
+  display: grid;
+  place-content: center;
+  align-self: center;
+  inline-size: 1.46rem;        /* the width of the T — the shared mark column */
+}
+#app[data-screen="menu"] .mark-dot {
+  grid-template-columns: 0.5rem;
+  grid-template-rows: 0.5rem;
+}
+/* The T of the icon, point up, falling down the shaft. */
+#app[data-screen="menu"] .mark-t {
+  grid-template-columns: repeat(3, 0.42rem);
+  grid-template-rows: repeat(2, 0.42rem);
+  gap: 0.1rem;
+}
+#app[data-screen="menu"] .pip {
+  background: var(--hue);
+  border-radius: 0.09rem;
+}
+#app[data-screen="menu"] .mark-t .pip:nth-child(1) { grid-area: 1 / 2; }
+#app[data-screen="menu"] .mark-t .pip:nth-child(2) { grid-area: 2 / 1; }
+#app[data-screen="menu"] .mark-t .pip:nth-child(3) { grid-area: 2 / 2; }
+#app[data-screen="menu"] .mark-t .pip:nth-child(4) { grid-area: 2 / 3; }
+/* Static, and only on the hero: a glow on all five would be five glows. */
+#app[data-screen="menu"] .mode-hero .pip { box-shadow: 0 0 0.55rem -0.05rem var(--hue); }
+
+/* ── the words ────────────────────────────────────────────────────────── */
+
+#app[data-screen="menu"] .mode-text {
+  min-inline-size: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+#app[data-screen="menu"] .mode-name {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#app[data-screen="menu"] .mode-hero .mode-name {
+  font-size: clamp(1.15rem, 4.4vw, 1.55rem);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+#app[data-screen="menu"] .mode-blurb {
+  font-size: 0.76rem;
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--fg-dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#app[data-screen="menu"] .mode-hero .mode-blurb {
+  font-size: 0.82rem;
+  white-space: normal;
+}
+/* A run waiting is a state, not a name — see the note in js/app/ui.js about
+   what "Resume Mar…" cost the one screen that most needed to be readable. */
+#app[data-screen="menu"] .mode-state {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ── the figures ──────────────────────────────────────────────────────── */
+
+#app[data-screen="menu"] .mode-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+#app[data-screen="menu"] .meta-cap {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+#app[data-screen="menu"] .meta-val {
+  font-size: 0.9rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+#app[data-screen="menu"] .mode-hero .mode-meta {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.05rem;
+}
+#app[data-screen="menu"] .mode-hero .meta-val { font-size: 1.35rem; }
+
+/* ── the discard ──────────────────────────────────────────────────────── */
+
+#app[data-screen="menu"] .mode-new {
+  flex: 0 0 auto;
+  inline-size: auto;
+  min-inline-size: max(2.75rem, 44px);
+  min-block-size: max(2.75rem, 44px);
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--menu-hair);
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* ── the foot ─────────────────────────────────────────────────────────── */
+
+#app[data-screen="menu"] .menu-foot {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-block-start: 0.1rem;
+}
+#app[data-screen="menu"] .lifetime {
+  min-inline-size: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--fg-dim);
+}
+/* Secondary chrome, dressed as secondary chrome. It used to be a full-width
+   button identical to Marathon's. */
+#app[data-screen="menu"] .menu-link {
+  margin-inline-start: auto;   /* holds the right edge with no lifetime line */
+  flex: 0 0 auto;
+  inline-size: auto;
+  min-block-size: max(2.75rem, 44px);
+  padding: 0.55rem 1.15rem;
+  border: 1px solid var(--menu-hair);
+  border-radius: 2rem;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* ── state ────────────────────────────────────────────────────────────── */
+
+#app[data-screen="menu"] .mode:active,
+#app[data-screen="menu"] .mode-new:active,
+#app[data-screen="menu"] .menu-link:active { transform: scale(0.99); }
+
+@media (hover: hover) {
+  #app[data-screen="menu"] .mode:hover { background: var(--menu-plate); }
+  #app[data-screen="menu"] .mode-hero:hover { border-color: var(--hue); }
+  #app[data-screen="menu"] .mode-new:hover,
+  #app[data-screen="menu"] .menu-link:hover { border-color: var(--accent); color: var(--fg); }
+}
+
+/* The arrival, once. Opacity and transform only, iteration count declared as
+   the longhand and equal to 1 — the menu settles and then the screen is
+   static, which is what §6d asks for. The rows are staggered by their own
+   delay so the list reads top-down, the way something falling would. */
+#app[data-screen="menu"] .menu-head,
+#app[data-screen="menu"] .mode-row,
+#app[data-screen="menu"] .menu-foot {
+  animation-name: menu-settle;
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.2, 0.85, 0.35, 1);
+  animation-iteration-count: 1;
+  animation-fill-mode: both;
+}
+#app[data-screen="menu"] .modes > .mode-row { animation-delay: 60ms; }
+#app[data-screen="menu"] .modes-rest .mode-row:nth-child(1) { animation-delay: 110ms; }
+#app[data-screen="menu"] .modes-rest .mode-row:nth-child(2) { animation-delay: 145ms; }
+#app[data-screen="menu"] .modes-rest .mode-row:nth-child(3) { animation-delay: 180ms; }
+#app[data-screen="menu"] .modes-rest .mode-row:nth-child(4) { animation-delay: 215ms; }
+#app[data-screen="menu"] .menu-foot { animation-delay: 250ms; }
+
+@keyframes menu-settle {
+  from { opacity: 0; transform: translateY(-0.5rem); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── when it stops fitting ────────────────────────────────────────────── */
+
+/* A phone in portrait has the width for a name and a figure but not for a
+   blurb beside them, and four wrapped blurbs would push the foot off the
+   bottom of the shaft. The hero keeps its blurb: it is the one mode anybody
+   is reading about. */
+@container menu (max-width: 26em) {
+  #app[data-screen="menu"] .modes-rest .mode-blurb { display: none; }
+}
+
+/* Short. Things go in the order a player would miss them least, and a line is
+   never truncated to make room — half a sentence tells nobody anything, so a
+   blurb either fits or goes. */
+@container menu (max-height: 40em) {
+  #app[data-screen="menu"] .modes-rest .mode-blurb { display: none; }
+  #app[data-screen="menu"] .menu { gap: 0.7rem; }
+  #app[data-screen="menu"] .modes { gap: 0.35rem; }
+}
+@container menu (max-height: 32em) {
+  #app[data-screen="menu"] .tagline { display: none; }
+  #app[data-screen="menu"] .mode-hero .mode-blurb { display: none; }
+  #app[data-screen="menu"] .mode-hero { padding-block: 0.6rem; }
+  #app[data-screen="menu"] .menu { gap: 0.55rem; }
+}
+@container menu (max-height: 25em) {
+  #app[data-screen="menu"] #overlay { padding-block: 0.4rem; }
+  #app[data-screen="menu"] .wordmark { font-size: 1.2rem; letter-spacing: 0.22em; }
+  #app[data-screen="menu"] .lifetime { display: none; }
+  #app[data-screen="menu"] .mode { padding-block: 0.3rem; }
+  #app[data-screen="menu"] .mode-hero .meta-val { font-size: 1.1rem; }
+  #app[data-screen="menu"] .menu::before { display: none; }
+}
+
+/* Phone landscape, and any launcher iframe short and wide enough to be one.
+   A MEDIA query on purpose (see the note on the container above): this is a
+   decision about the shape of the screen, and it should hold whatever size
+   the player has set the text to. Height is what has run out, not width, so
+   the composition turns on its side — the wordmark and the chrome take a
+   column and the modes take the rest — instead of everything shrinking until
+   none of it is legible. */
+@media (min-width: 42em) and (max-height: 34em) {
+  #app[data-screen="menu"] .menu {
+    inline-size: min(52rem, 100%);
+    display: grid;
+    grid-template-columns: minmax(0, 8fr) minmax(0, 11fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: clamp(1.25rem, 4vw, 3rem);
+    row-gap: 0.5rem;
+  }
+  #app[data-screen="menu"] .menu-head {
+    align-items: start;
+    text-align: start;
+    align-self: center;
+  }
+  #app[data-screen="menu"] .wordmark { text-indent: 0; }
+  #app[data-screen="menu"] .modes { grid-row: 1 / span 2; grid-column: 2; }
+  #app[data-screen="menu"] .menu-foot { grid-column: 1; }
+  #app[data-screen="menu"] .modes-rest .mode-blurb { display: none; }
+  #app[data-screen="menu"] .mode-hero { padding: 0.7rem 0.9rem; }
+  #app[data-screen="menu"] .mode { padding-block: 0.4rem; }
+
+  #app[data-screen="menu"] .menu::before { inset: -1.5rem -1.25rem; }
+
+  /* Undoing the short tiers above, on purpose and conditionally. They fire on
+     the container's height, and in THIS layout height is no longer the axis
+     that ran out — the modes moved sideways and took two thirds of the screen
+     with them, so the wordmark, the tagline and the hero's blurb have room
+     again. The nested container query is what keeps that from being a lie at
+     a large font scale: at fontScale 1 a 390px-tall frame is 22em and gets
+     everything back, at 1.5 the same frame is 15em and stays compact. */
+  @container menu (min-height: 21em) {
+    #app[data-screen="menu"] .wordmark {
+      font-size: clamp(1.35rem, 5.6vw, 2.45rem);
+      letter-spacing: 0.3em;
+    }
+    #app[data-screen="menu"] .tagline,
+    #app[data-screen="menu"] .lifetime,
+    #app[data-screen="menu"] .mode-hero .mode-blurb { display: block; }
+    #app[data-screen="menu"] .mode-hero .meta-val { font-size: 1.35rem; }
+    #app[data-screen="menu"] .menu::before { display: block; }
+  }
 }
 
 /* ─── Settings that turn things off ───────────────────────────────────────*/

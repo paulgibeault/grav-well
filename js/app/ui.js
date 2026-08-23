@@ -102,6 +102,7 @@ function mk(tag, opts) {
 function button(text, onClick, opts) {
     const o = opts || {};
     const b = mk('button', { text: text, attrs: { type: 'button' } });
+    if (o.className) b.className = o.className;
     if (o.primary) b.dataset.primary = '';
     if (o.style) b.setAttribute('style', o.style);
     if (o.label) b.setAttribute('aria-label', o.label);
@@ -116,17 +117,6 @@ function defList(pairs) {
         dl.append(mk('dt', { text: k }), mk('dd', { text: v }));
     }
     return dl;
-}
-
-function row(children) {
-    // The card is a flex column and .overlay button is width:100%, so anything
-    // side-by-side needs its own row box. Inline styles rather than new class
-    // names: css/well.css is somebody else's file and this is layout glue for
-    // nodes that only exist here.
-    return mk('div', {
-        style: 'display:flex; gap:0.4rem; align-items:center;',
-        children: children,
-    });
 }
 
 function fieldRow(labelText, control, valueEl) {
@@ -236,63 +226,188 @@ export function createUI(root, handlers) {
         try { first.focus({ preventScroll: true }); } catch (_) { first.focus(); }
     }
 
+    /* The menu — the one screen that is not a card.
+     *
+     * A player meets this before they meet the game, and the game is about
+     * depth, so the screen is built as the mouth of the well rather than as a
+     * dialog floating over a blurred playfield: css/well.css lights the top of
+     * the shaft, scatters the starfield, and lets the bottom fall away into
+     * the dark. Everything here does is hand it a structure worth lighting.
+     *
+     * Three rules carry the hierarchy the old list did not have:
+     *   · ONE mode is the hero — whichever one the player is on, which on a
+     *     fresh install is modes.js's default. It gets the plate, the size,
+     *     its blurb and its personal best.
+     *   · The other four are quiet rows under a hairline, equal to each other
+     *     and plainly below the hero. Five equal buttons is a form, not a
+     *     menu.
+     *   · Settings and lifetime totals are chrome. They go to the foot, in the
+     *     dark, at the smallest size on the screen.
+     *
+     * No new data is read: `modes`, `records` and `stats` are what js/main.js
+     * already hands over. Filing each best under the mode that earned it —
+     * rather than in one anonymous "Personal bests" table — is the whole
+     * reason a menu is worth showing them at all.
+     *
+     * The screen contract is untouched: this is still whatever paint() puts
+     * in #overlay, still armed on [data-primary], still built node-by-node
+     * with textContent (§7b).
+     */
     function menuScreen(data) {
         const d = data || {};
-        const modes = Array.isArray(d.modes) ? d.modes : [];
-        const kids = [
-            mk('h1', { text: 'Gravity Well' }),
-            mk('p', { text: 'The well is deep. Keep it clear.' }),
-        ];
+        const list = (Array.isArray(d.modes) ? d.modes : []).filter(Boolean);
+        const records = Array.isArray(d.records) ? d.records : [];
+        const st = d.stats && typeof d.stats === 'object' ? d.stats : null;
 
-        for (const m of modes) {
-            const main = button(
-                (m.resumable ? 'Resume ' : '') + (m.name || m.id),
-                () => call('play', m.id),
-                { primary: m.id === d.selected, style: 'flex:1 1 auto;' });
-            // The blurb rides inside the button as a second line: one target,
-            // 44 px minimum, and nothing to mis-tap next to it.
-            if (m.blurb) {
-                main.textContent = '';
-                main.append(
-                    mk('span', { text: (m.resumable ? 'Resume ' : '') + (m.name || m.id) }),
-                    mk('span', {
-                        text: m.blurb,
-                        style: 'display:block; font-size:0.78rem; font-weight:500; color:var(--fg-dim);',
-                    }));
-            }
-            const kids2 = [main];
+        const hero = list.find((m) => m.id === d.selected) || list[0] || null;
+        const rest = list.filter((m) => m !== hero);
+
+        const head = mk('header', {
+            className: 'menu-head',
+            children: [
+                mk('h1', { className: 'wordmark', text: 'Gravity Well' }),
+                mk('p', { className: 'tagline', text: 'The well is deep. Keep it clear.' }),
+            ],
+        });
+
+        const modes = mk('div', {
+            className: 'modes',
+            children: [
+                hero ? modeRow(hero, true) : null,
+                rest.length ? mk('div', {
+                    className: 'modes-rest',
+                    children: rest.map((m) => modeRow(m, false)),
+                }) : null,
+            ],
+        });
+
+        const foot = mk('footer', {
+            className: 'menu-foot',
+            children: [
+                lifetimeLine(st),
+                button('Settings', () => call('openSettings'), { className: 'menu-link' }),
+            ],
+        });
+
+        return mk('section', { className: 'menu', children: [head, modes, foot] });
+
+        /* One mode. The whole row is the button, so there is a single target
+         * per mode and nothing to mis-tap beside it — except the discard,
+         * which is destructive and is therefore deliberately its own control. */
+        function modeRow(m, isHero) {
+            const name = String(m.name || m.id || '');
+            const meta = metaFor(m);
+
+            const b = button('', () => call('play', m.id), {
+                className: isHero ? 'mode mode-hero' : 'mode',
+                primary: isHero,
+            });
+            b.dataset.mode = String(m.id || '');
+
+            /* Second line: the state if there is one, the blurb otherwise.
+             *
+             * "Resume Marathon" used to be the NAME, and it did not fit — on a
+             * phone the row also carries the discard button, and the name got
+             * ellipsised to "Resume Mar…" on the one screen where a player
+             * most needs to know which run they are walking back into. A mode
+             * with a run waiting does not need explaining either, so the state
+             * takes the blurb's line rather than a third one, and no row
+             * grows to make room for it. */
+            const second = m.resumable
+                ? mk('span', { className: 'mode-state', text: 'Run in progress' })
+                : (m.blurb ? mk('span', { className: 'mode-blurb', text: m.blurb }) : null);
+
+            // .filter(Boolean), because append() STRINGIFIES what it is handed:
+            // a mode with no figure to show — Zen keeps no record by design —
+            // would paint the word "null" where the number goes. mk()'s
+            // `children` filters; a bare append does not.
+            b.append(...[
+                mark(m, isHero),
+                mk('span', {
+                    className: 'mode-text',
+                    children: [mk('span', { className: 'mode-name', text: name }), second],
+                }),
+                meta ? mk('span', {
+                    className: 'mode-meta',
+                    children: [
+                        mk('span', { className: 'meta-cap', text: meta.cap }),
+                        mk('span', { className: 'meta-val', text: meta.val }),
+                    ],
+                }) : null,
+            ].filter(Boolean));
+
+            // Blurbs are dropped on a short screen and the captions are single
+            // clipped words; the label spells all of it out so the button says
+            // the same thing to a screen reader at every size. It opens with
+            // the visible name, which is what label-in-name asks for.
+            b.setAttribute('aria-label', [
+                m.resumable ? name + ', run in progress' : name,
+                m.blurb,
+                meta ? meta.cap + ' ' + meta.val : '',
+            ].filter(Boolean).join(' — '));
+
+            const kids = [b];
             if (m.resumable) {
-                // Discarding a saved run is destructive, so the label says so
-                // and js/main.js asks before it happens.
-                kids2.push(button('New', () => call('fresh', m.id), {
-                    style: 'inline-size:auto; flex:0 0 auto; padding:0.7rem 0.8rem;',
-                    label: 'Start a new ' + (m.name || m.id) + ' run, discarding the saved one',
+                kids.push(button('New', () => call('fresh', m.id), {
+                    className: 'mode-new',
+                    label: 'Start a new ' + name + ' run, discarding the saved one',
                 }));
             }
-            kids.push(row(kids2));
+            return mk('div', { className: 'mode-row', children: kids });
         }
 
-        // Personal bests. `label` and the formatted value both come from the
-        // records themselves, so a record category added later needs no code
-        // here — and both are written with textContent like everything else.
-        const records = Array.isArray(d.records) ? d.records : [];
-        if (records.length) {
-            kids.push(mk('h2', { text: 'Personal bests', style: 'margin-block-start:0.4rem;' }));
-            kids.push(defList(records.map((r) => [r.label, r.text])));
+        /* The mode's own piece, in the mode's own hue — the stylesheet owns
+         * which hue, keyed off data-mode, so the menu and the well agree
+         * without this file ever naming a colour. The hero gets a whole T (the
+         * piece on the icon, falling down the shaft); the others get the one
+         * block that falls past it. Decoration: hidden from the a11y tree. */
+        function mark(m, isHero) {
+            const pips = [];
+            for (let i = 0; i < (isHero ? 4 : 1); i++) pips.push(mk('span', { className: 'pip' }));
+            return mk('span', {
+                className: isHero ? 'mark mark-t' : 'mark mark-dot',
+                attrs: { 'aria-hidden': 'true' },
+                children: pips,
+            });
         }
 
-        const st = d.stats && typeof d.stats === 'object' ? d.stats : null;
-        if (st) {
-            const pairs = [];
-            if (st.gamesPlayed != null) pairs.push(['Runs', formatInt(st.gamesPlayed)]);
-            if (st.lines != null) pairs.push(['Lines cleared', formatInt(st.lines)]);
-            if (st.quads != null) pairs.push(['Quads', formatInt(st.quads)]);
-            if (st.tspins != null) pairs.push(['T-spins', formatInt(st.tspins)]);
-            if (pairs.length) kids.push(defList(pairs));
+        /* What a mode has to show for itself: its personal best, or — for the
+         * Daily Well, which keeps no record category — the streak.
+         *
+         * Records arrive already formatted and already labelled by the mode
+         * that owns them ("Marathon score", "Sprint 40"), so the match is made
+         * on that label rather than against a table of ids kept in step by
+         * hand: a mode added to modes.js later shows its best here with no
+         * edit to this file. */
+        function metaFor(m) {
+            if (m.id === 'daily' && st && st.daily && Number(st.daily.streak) > 0) {
+                return { cap: 'Streak', val: formatInt(st.daily.streak) };
+            }
+            const name = String(m.name || '').trim().toLowerCase();
+            if (!name) return null;
+            for (const r of records) {
+                if (!r || !r.text) continue;
+                const label = String(r.label || '').trim().toLowerCase();
+                if (label === name || label.startsWith(name + ' ')) {
+                    return { cap: 'Best', val: String(r.text) };
+                }
+            }
+            return null;
         }
 
-        kids.push(button('Settings', () => call('openSettings')));
-        return card(kids);
+        /* One line of lifetime totals, or nothing at all on a fresh install.
+         * The four-row table this replaces outweighed the five modes it sat
+         * under; a player who wants the full set has the launcher's stats
+         * sheet, which is where those numbers live anyway. */
+        function lifetimeLine(stats) {
+            if (!stats) return null;
+            const runs = Math.floor(Number(stats.gamesPlayed) || 0);
+            if (runs < 1) return null;
+            const lines = Math.floor(Number(stats.lines) || 0);
+            const parts = [formatInt(runs) + (runs === 1 ? ' run' : ' runs')];
+            if (lines > 0) parts.push(formatInt(lines) + ' lines cleared');
+            return mk('p', { className: 'lifetime', text: parts.join(' · ') });
+        }
     }
 
     function statPairs(d) {
@@ -362,10 +477,12 @@ export function createUI(root, handlers) {
         }
         scheme.addEventListener('change', () => call('changeSetting', 'scheme', scheme.value));
         kids.push(fieldRow('Touch scheme', scheme));
+        kids.push(rotateControl(s.tapRotate === 'ccw' ? 'ccw' : 'cw'));
+        kids.push(flickControl(Number(s.flick) > 0 ? Number(s.flick) : 1));
         kids.push(mk('p', {
+            className: 'set-note',
             text: 'Keyboard and pointer are both live at all times. Handedness follows your'
                 + ' launcher setting (' + (d.handedness || 'right') + ').',
-            style: 'font-size:0.8rem;',
         }));
 
         // — feel —
@@ -441,6 +558,107 @@ export function createUI(root, handlers) {
         kids.push(button('Reset scores and progress', () => call('resetProgress')));
         kids.push(button('Done', () => call('closeSettings'), { primary: true }));
         return card(kids);
+
+        /* §4 — which way a single tap turns the piece.
+         *
+         * The owner asked for this by name, and the useful way to ask the
+         * question is the player's: a tap turns the piece THIS way, and the
+         * two-finger tap (or a right-click) turns it the other. So the control
+         * shows both directions rather than inverting an unnamed default —
+         * "Invert rotation" is a checkbox that makes a player guess what it is
+         * inverting, and half of them guess wrong.
+         *
+         * Real radios, visually hidden under their own labels: the arrow keys
+         * move between the two for free, the label is the 44px target, and the
+         * focus ring lands on the option the browser thinks is focused. */
+        function rotateControl(current) {
+            const group = mk('div', {
+                className: 'seg-field',
+                attrs: { role: 'radiogroup', 'aria-label': 'Tap rotates' },
+            });
+            group.append(mk('span', { className: 'set-label', text: 'Tap rotates' }));
+
+            const seg = mk('div', { className: 'seg' });
+            const name = 'tap-rotate-' + Math.random().toString(36).slice(2, 8);
+            for (const [value, glyph, text] of [
+                ['cw', '↻', 'Clockwise'],
+                ['ccw', '↺', 'Counter-clockwise'],
+            ]) {
+                const id = name + '-' + value;
+                const input = mk('input', { className: 'seg-input', attrs: { id: id, name: name } });
+                input.type = 'radio';
+                input.value = value;
+                input.checked = current === value;
+                input.addEventListener('change', () => {
+                    if (input.checked) call('changeSetting', 'tapRotate', value);
+                });
+                const label = mk('label', {
+                    className: 'seg-opt',
+                    attrs: { for: id },
+                    children: [
+                        mk('span', { className: 'seg-glyph', text: glyph, attrs: { 'aria-hidden': 'true' } }),
+                        mk('span', { className: 'seg-text', text: text }),
+                    ],
+                });
+                seg.append(input, label);
+            }
+            group.append(seg, mk('p', {
+                className: 'set-note',
+                text: 'A two-finger tap — or a right-click — turns it the other way.',
+            }));
+            return group;
+        }
+
+        /* §4 — the flick-down hard drop, the one gesture whose right threshold
+         * is a property of a thumb rather than of the game. It is stored as a
+         * single multiplier over js/input/touch.js's defaults and scales all
+         * three of its gates together.
+         *
+         * The slider says what it DOES, not what it is: 1.8 means nothing to
+         * anyone, so the ends are named and the live value is a word. The
+         * number is still the thing being stored — this is only the label. */
+        function flickControl(current) {
+            const field = mk('div', { className: 'set-field' });
+            const value = mk('span', { className: 'set-value' });
+            field.append(mk('span', {
+                className: 'set-head',
+                children: [mk('span', { className: 'set-label', text: 'Flick to drop' }), value],
+            }));
+
+            const input = mk('input', { className: 'set-range' });
+            input.type = 'range';
+            input.min = '40';
+            input.max = '250';
+            input.step = '10';
+            input.value = String(Math.round(Math.min(2.5, Math.max(0.4, current)) * 100));
+            input.setAttribute('aria-label', 'Flick to drop');
+
+            const say = () => {
+                const v = Number(input.value) / 100;
+                const word = v < 0.7 ? 'Much firmer flick'
+                    : v < 0.95 ? 'Firmer flick'
+                        : v <= 1.05 ? 'Default'
+                            : v <= 1.7 ? 'Lighter flick' : 'Much lighter flick';
+                value.textContent = word;
+                input.setAttribute('aria-valuetext', word);
+            };
+            say();
+            input.addEventListener('input', () => {
+                say();
+                // The screen is NOT rebuilt on a settings change: re-rendering
+                // under a dragging thumb drops the pointer capture and strands
+                // the drag. The row updates itself; js/main.js persists.
+                call('changeSetting', 'flick', Number(input.value) / 100);
+            });
+            field.append(input, mk('span', {
+                className: 'set-ends',
+                children: [
+                    mk('span', { text: 'Harder to trigger' }),
+                    mk('span', { text: 'Easier' }),
+                ],
+            }));
+            return field;
+        }
 
         function slider(labelText, key, current, min, max, step, fmt, toValue) {
             const input = mk('input', { style: 'flex:1 1 8rem; min-inline-size:6rem;' });
