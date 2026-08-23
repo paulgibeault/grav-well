@@ -1,6 +1,6 @@
 {
   "name": "grav-well",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "description": "Gravity Well — a faithful falling-block stacker for Paul's Arcade.",
