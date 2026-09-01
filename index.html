@@ -35,6 +35,15 @@
           <dt>Lines</dt><dd id="v-lines">0</dd>
           <dt>Level</dt><dd id="v-level">1</dd>
           <dt id="l-clock">Time</dt><dd id="v-clock">0:00.00</dd>
+          <!-- The combo row is present but hidden until a chain is actually
+               running (js/app/ui.js, hud()). Shipped in the markup rather than
+               created on demand so the rail never reflows mid-chain, and so
+               this module keeps its rule that the DOM outside #overlay is
+               fixed. `display: contents` on the wrapper keeps the dt/dd in the
+               <dl> grid; [hidden] takes the pair out together. -->
+          <div id="r-combo" class="readout-pair" hidden>
+            <dt>Combo</dt><dd id="v-combo">&times;0</dd>
+          </div>
         </dl>
       </aside>
 

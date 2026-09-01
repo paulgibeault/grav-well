@@ -119,8 +119,24 @@ current-generation stackers. Everything in this section is pure logic
 | J | J | blue |
 | L | L | orange |
 
-An **accessibility glyph mode** (settings toggle) stamps each piece with a
-distinct engraved rune so color is never the only channel.
+An **accessibility glyph mode** (settings toggle, Settings → Feel → *Piece
+glyphs*) stamps each piece with a distinct engraved rune so color is never the
+only channel.
+
+**The rune is the piece's own letter.** The seven pieces have been named after
+the shapes of letters for forty years, so the mark a player has to learn is one
+they already know — and unlike an arbitrary rune set, seven letters are
+guaranteed distinct from each other at a glance. I is drawn as a bar rather
+than a serif "I", because a bare vertical stroke at 24 px is indistinguishable
+from noise. It is cut into the block rather than painted on it: a dark pass in
+the groove and a light pass for the lip, offset toward the same corner the
+block's own top band is lit from.
+
+Garbage carries no glyph — it is not a piece, and stamping it with a letter
+would be a lie about where it came from. Below 11 px a cell the mark is skipped
+entirely, because a groove thinner than the stroke that draws it reads as dirt;
+at that size the piece's whole *shape* is visible anyway, which is the same
+information the glyph is carrying.
 
 ### 2.3 Randomizer — 7-bag
 
@@ -281,9 +297,17 @@ seed + input log, and the entire core is unit-testable under `node --test`.
 
 ## 3. Modes
 
+*Amended 2026-09-01.* The escalating standard game is now called **Arcade**,
+and **Marathon** is the level-pinned mode. Nothing about the escalating game's
+rules moved — only its name, because "Marathon" was needed for the mode that
+actually lets you run one. The two ask different questions: Arcade asks how
+fast you can still think, Marathon asks how long you can keep it up, and the
+second needs a level that stops moving.
+
 | Mode | Rules | Persistence |
 | --- | --- | --- |
-| **Marathon** | **The standard endless game, and the default mode.** No line goal and no finish line: levels advance every 10 lines forever, gravity rides the §2.6 curve down to true 20G at level 19 and stays there, and the run ends when the well tops out. (It shipped as levels 1–15 / 150 lines with a deferred "Endless" toggle; the playtest verdict was that Marathon *is* the endless game, so the goal came out and the toggle was never revived — there is no setting, because there is nothing left to switch.) | leaderboard `marathon`, record `marathon-score`, resumable run snapshot |
+| **Arcade** | **The standard endless game, and the default mode.** No line goal and no finish line: levels advance every 10 lines forever, gravity rides the §2.6 curve down to true 20G at level 19 and stays there, and the run ends when the well tops out. (It shipped as levels 1–15 / 150 lines with a deferred "Endless" toggle; the playtest verdict was that the standard game *is* the endless one, so the goal came out and the toggle was never revived — there is no setting, because there is nothing left to switch.) | leaderboard `arcade`, record `arcade-score`, resumable run snapshot |
+| **Marathon** | **Pin the level and hold it.** The player picks a level 1–19 on the menu row; the run *starts* there and never advances — `levelFor()` is not consulted and no `levelup` is ever emitted. Gravity and the §2.9 score multiplier both take the pinned level, so a level-9 pin scores like level 9 from its first line. 19 is the top of the range because §2.6 has already bottomed out on the 20G floor by then, so every level above it is the same game at the same speed. Ends on a top-out like any other run. | leaderboard `marathon` **keyed by level** (`L8`), record `marathon-l<n>` created lazily per level, resumable run snapshot |
 | **Sprint 40** | Clear 40 lines fastest. Instant retry on `R`. | record `sprint-40` (`duration-ms`, lower-is-better) |
 | **Ultra** | 3:00 on the clock, max score. | leaderboard `ultra`, record `ultra-score` |
 | **Zen** | Level-1 gravity forever, no top-out (an overflowing well gently sinks the bottom rows away), untimed. | lines/session stats only, resumable |
@@ -291,6 +315,22 @@ seed + input log, and the entire core is unit-testable under `node --test`.
 
 Every mode keeps its own resumable snapshot (fleet convention — switching
 modes never costs progress).
+
+**Why the Marathon board is keyed by level.** A table mixing level-2 runs with
+level-15 runs is not a leaderboard, it is a pile — the same problem the Daily
+Well solves by keying on the day, solved the same way. The personal record is
+per level too, and a category is only created the first time that level is
+played, so a player who lives at level 8 carries one record rather than
+nineteen. Arcade keeps its own flat board and never shares one with a pinned
+run, which is the whole reason the two modes are separately named.
+
+**The legacy `marathon` / `marathon-score` categories are not reused by
+Arcade.** They hold scores set under the old name and the SDK has no rename;
+pointing Arcade at them would mix escalating runs into the pinned board
+forever. Old records stay visible in the launcher's Records sheet under the
+label they were written with, and nothing is destroyed. A snapshot bump
+(`SNAPSHOT_VERSION` 1 → 2) retires stored mid-run Marathon saves for the same
+reason: every one of them predates the mode meaning something different.
 
 ---
 
@@ -382,6 +422,44 @@ well walls; re-rendered on resize/theme change), an offscreen board layer
 and an FX layer (line-clear collapse ≤ 250 ms). HUD (score/level/lines/timer,
 hold + next previews) is DOM beside the canvas.
 
+### 5a. Escalation — the heat ladder
+
+*Added 2026-09-01.* Two things a run can be on a roll about, and one ladder
+they both climb so that every channel agrees about how big it is getting.
+
+**The two counts** are kept by the reducer and ride out on the `clear` event:
+
+- **`combo`** — the chain length, as it always was. A chain of 1 is not a
+  chain; it is the first clear of one, and every clear is that.
+- **`quadStreak`** — consecutive quads, which is *not* the same as the B2B
+  chain (`b2bChain`, also on the event): a T-spin double extends the
+  back-to-back chain and ends the quad streak. Two counters, because they
+  break differently.
+
+**The ladder** (`ui.heatFor`) is `warm` → `hot` (4) → `blaze` (7) → `nova`
+(10), fed by whichever of the two is hotter, with a quad streak worth roughly
+three combo steps — quads are rarer and a streak is harder to hold. A
+Singularity sits above all four rungs as `record` and is deliberately *not*
+reachable by grinding a chain, however long.
+
+| Channel | What escalates |
+| --- | --- |
+| Banner | Colour, then a swell, then a pulse. Text names the three facts separately — `B2B QUAD ×3 · COMBO 8` — because a bare `×N` would mean the streak on one lock and the chain on the next. |
+| Rail | A combo row that appears at 2 and leaves when the chain breaks, tinted on the same ladder. |
+| FX (§5) | A quad wash over the whole shaft, a shock leaving the cleared band, and from the **third** quad in a row a beam standing in the shaft. Chains buy spark count and reach, not duration — the collapse stays capped at 250 ms. |
+| Audio (§6) | The chain climbs a pitch ladder and counts itself out on a pawl; the quad streak escalates **downward** — bigger, longer, lower — plus a second blast from the third in a row. |
+
+**Escalation is in reach, colour and depth — barely in level or brightness.**
+The quad is already the loudest cue and the brightest thing on screen; making
+it louder and brighter four times over ends in a limiter and in white. Both
+the FX and the sound pack cap at a streak of five.
+
+**Reduced motion and power saver** are unaffected in policy: `fx.notify()`
+already returns early under reduced motion, so none of this exists there, and
+the quad's wash/shock/beam are *feedback* and survive power saver exactly as
+the clear band and lock flash already do. Only the sparks, which are
+decoration, drop.
+
 **Loop policy (§6a/§6d of the guide).** `Arcade.loop` is the only frame
 source. During live play a piece is always falling, so the loop runs —
 gameplay-essential motion. On menus, pause, settings and game-over the loop
@@ -455,7 +533,7 @@ registered via `ArcadeAudioElements.registerPack({...})` →
 | §3a Async stores | Not used in v1 — every save fits `Arcade.state`. Replay archives would be the first `Arcade.store` consumer (M4). |
 | §3b Sync | `settings` and mode snapshots opt in (`{ sync: true }`, all ≪ 64 KB); records/scores merge via the launcher already. |
 | §3c Migration | Fleet-native from day one — no legacy keys, no `adopt` needed. `migrate('v1')` reserved for future reshapes. |
-| §4 Profile | `Arcade.player.name()` for board entries; **scores** `marathon`, `ultra`, `daily` (keyed by date, `order: 'asc'`); **records** `sprint-40` (`duration-ms`, lower), `marathon-score`, `ultra-score` (integer, higher); **stats** counters (below). |
+| §4 Profile | `Arcade.player.name()` for board entries; **scores** `arcade`, `ultra`, `marathon` (keyed by level, e.g. `L8`), `daily` (keyed by date, `order: 'asc'`); **records** `sprint-40` (`duration-ms`, lower), `arcade-score`, `ultra-score`, `marathon-l<n>` (integer, higher); **skill records** `best-combo`, `best-b2b`, `best-quad-streak`, `best-lock` (integer, higher, cross-mode — see below); **stats** counters (below). |
 | §5 Settings | Theme, fontScale, reducedMotion, handedness, powerSaver, audioVolume — all honored as specified in §5–6 above; one `onSettingsChange` subscription flips cached multipliers and kicks a redraw. |
 | §6 Lifecycle | `onSuspend`: pause sim, park loop, suspend audio, **synchronously flush the run snapshot**; `onResume`: reset accumulators, stay on the pause screen (never auto-unpause into gameplay). Eviction-safe by construction: the snapshot is written on every lock and on suspend. |
 | §6d Idle | 0 fps outside live play; finite pulses on the token; Performance-trace verified. |
@@ -472,6 +550,36 @@ registered via `ArcadeAudioElements.registerPack({...})` →
 | §13 Acceptance | `npm run acceptance` from the launcher against the staged game is an M2 exit gate. |
 | §13a CI/CD | Thin `pages.yml` caller (`version_bump: true`, `contents: write`); `tools/stage.mjs` (standard tracked-files staging) + byte-identical `verify-artifact.mjs` / `inject-precache.mjs`; tests in `tests/`, Node ≥ 24; Pages source = GitHub Actions. |
 
+### 7a. The skill records
+
+Four cross-mode records for what a run was *interesting* for, which its score
+does not say. Two 40 000-point Arcade runs are the same row on a board; one of
+them got there on a seven-quad back-to-back chain and the other ground it out
+in singles.
+
+| Category | From | Label |
+| --- | --- | --- |
+| `best-combo` | `stats.maxCombo` | Best combo |
+| `best-b2b` | `stats.maxB2b` | Longest back-to-back |
+| `best-quad-streak` | `stats.maxQuadStreak` | Longest quad streak |
+| `best-lock` | `stats.bestLock` | Biggest single clear |
+
+They are **cross-mode on purpose**: "the best combo you have ever built" is a
+fact about the player, not about Ultra, and splitting it five ways would give
+five easy records instead of one hard one. They are filed for every finished
+run whether or not it *qualified* for its mode's board — a Sprint abandoned on
+line 12 still built whatever it built.
+
+**Zen is the one exclusion** (`skillRecords: false`). It cannot top out, so a
+combo there can be assembled at leisure with the stack at the ceiling; filing
+those beside a combo built under threat would retire all four categories
+permanently on the first Zen session. Zen still contributes lifetime counters.
+
+A zero is never filed, so a player who has not cleared a line does not get four
+categories reading 0 in the launcher's Records sheet. `bestLock` counts the
+*award* only and excludes drop points, which are a function of how far the
+piece fell rather than of what the player built.
+
 ---
 
 ## 8. Persistence schema
@@ -480,10 +588,18 @@ All under `arcade.v1.grav-well.*` via the SDK:
 
 | Key | Contents | Flags |
 | --- | --- | --- |
-| `settings` | DAS/ARR/SDF, ghost, glyph mode, key map, touch scheme, flick sensitivity, tap rotation direction, bed on/off, lockdown mode | `sync: true` |
-| `run.<mode>` | Mid-run snapshot: board, active piece + rotation state, bag `rng.getState()`, queue, hold, score/lines/level/combo/B2B, elapsed, reset budget | `sync: true` |
-| `stats` (via `Arcade.stats`, category `core`) | gamesPlayed & per-mode counts, total lines/pieces, quads, tspins, perfect clears, max combo, play time, daily streak | — |
+| `settings` | DAS/ARR/SDF, ghost, glyph mode, key map, touch scheme, flick sensitivity, tap rotation direction, **Marathon pin level**, bed on/off, lockdown mode | `sync: true` |
+| `run.<mode>` | Mid-run snapshot (`v: 2`): board, active piece + rotation state, bag `rng.getState()`, queue, hold, score/lines/level/combo/B2B, **pin level, B2B chain, quad streak**, elapsed, reset budget | `sync: true` |
+| `stats` (via `Arcade.stats`, category `core`) | gamesPlayed & per-mode counts, total lines/pieces, quads, tspins, perfect clears, **peaks: max combo, max B2B chain, max quad streak, biggest single clear**, play time, daily streak | — |
 | replay/telemetry buffers (M4) | input logs | `exportable: false` |
+
+The **pin level** lives in `settings` rather than in the mode table because it
+is a statement about how fast this player likes to play, not a per-run
+decision — and because it is the key the Marathon leaderboard is filed under,
+so it has to survive a reload or the player's board moves out from under them.
+It reaches core as a `createGame({ pinLevel })` opt through
+`modes.gameOptsFor()`, and is ignored by every mode that does not declare
+`pinnable`.
 
 Records and scores as listed in §7. A launcher Save → Load round-trip
 restores every one of these (acceptance item).

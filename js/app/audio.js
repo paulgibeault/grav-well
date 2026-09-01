@@ -166,6 +166,8 @@ export function createAudio(opts) {
     let bedAtSec = 0;        // audio-clock stamp of the last (re)build
     let grounded = false;    // was the active piece resting last frame?
     let lastShiftMs = -1e9;
+    // The board revision the bed was last banded against. See consume().
+    let lastBoardRev = -1;
 
     // The bed's own clock. The AudioContext's currentTime is the clock its
     // timeline is scheduled on, and it freezes when the SDK suspends audio on
@@ -239,7 +241,12 @@ export function createAudio(opts) {
         const ev = g.events;
         if (!ev) return;
         const n = ev.length;
-        let moved = false;    // the stack changed → re-band
+        /* "The stack changed" is asked of the BOARD, not inferred from the
+         * events: Zen's sink moves it with nothing but a 'hold' behind it, and
+         * the bed would keep the depth of a well that is no longer that deep. */
+        const rev = g.boardRev | 0;
+        let moved = rev !== lastBoardRev;
+        lastBoardRev = rev;
         let locked = false;
         let hard = false;
 
@@ -262,7 +269,6 @@ export function createAudio(opts) {
                     break;
                 case 'lock':
                     locked = true;
-                    moved = true;
                     // The twist goes in first — it is the gesture that put the
                     // piece there — and the lock seats under it.
                     if (e.tspin && e.tspin !== 'none') {
@@ -271,12 +277,17 @@ export function createAudio(opts) {
                     a.play('lock', { hard });
                     break;
                 case 'clear':
-                    moved = true;
-                    a.play('clear', { count: e.count });
+                    /* `combo` climbs the pack's pitch ladder and counts itself
+                     * out on the pawl; `streak` is how many quads in a row this
+                     * one makes. Both are read straight off the event — this
+                     * module decides WHEN a cue plays, never what escalation
+                     * means, which is the pack's business (js/soundpack.js). */
+                    a.play('clear', { count: e.count, combo: e.combo });
                     // Quad rides ON TOP of the clear rather than replacing it:
                     // the shatter is the four rows going, the blast is the well
-                    // answering from far up the shaft (send 0.72).
-                    if (e.count >= 4) a.play('quad');
+                    // answering from far up the shaft (send 0.72). The streak
+                    // sends it further down the shaft each time, not louder.
+                    if (e.count >= 4) a.play('quad', { streak: e.quadStreak || 1 });
                     // A Singularity (DESIGN §1) — the well is empty. Layered
                     // for the same reason: the rows did break, and this is what
                     // the shaft does about it afterwards, from further away than
@@ -353,6 +364,7 @@ export function createAudio(opts) {
     function stop() {
         live = false;
         grounded = false;
+        lastBoardRev = -1;      // the next run's first frame is a change
         stopBed(BED_FADE);
     }
 

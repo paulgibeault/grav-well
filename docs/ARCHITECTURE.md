@@ -15,6 +15,9 @@ Fleet contract: [GAME_INTEGRATION.md](https://github.com/paulgibeault/paulgibeau
 ```
 js/core/     pure. No DOM, no window, no Arcade, no timers, no Math.random.
              Imports: other js/core/* and ./arcade-rng.js ONLY.
+             norm.js holds the settings/stats normalizers, so createGame() and
+             deserialize() cannot disagree about what a legal block is.
+             (serialize.js may not import game.js — the graph is one-way.)
              Every file here must be importable by `node --test`.
 js/render/   canvas drawing. Reads core state, never mutates it. No Arcade
              except settings values passed IN as plain arguments.
@@ -190,8 +193,15 @@ Triple breaks it; a no-line T-spin neither breaks nor extends it.
 
 ```js
 export function createGame(opts)
-// opts: { seed, mode = 'marathon', settings = {}, garbageRows = 0, goalLines, timeLimitMs }
+// opts: { seed, mode = 'arcade', settings = {}, garbageRows = 0, goalLines,
+//         timeLimitMs, goal, pinLevel }
 // settings: { das = 167, arr = 33, sdf = 20, ghost = true, lockdown = 'extended' }
+// pinLevel: null = the escalating curve; 1..MAX_PIN_LEVEL freezes the level for
+//           the whole run (Marathon). The run STARTS there, levelFor() is never
+//           consulted, and no 'levelup' is ever emitted.
+
+export const MAX_PIN_LEVEL            // 19 — where §2.6 reaches the 20G floor
+export const SNAPSHOT_VERSION         // re-exported from serialize.js
 
 export function press(g, action)      // ACTIONS.*  — idempotent while held
 export function release(g, action)
@@ -210,8 +220,17 @@ State object (read by render/app; **never mutated outside core**):
   board, active: piece|null, ghostY: number, hold: type|null, holdUsed: bool,
   queue: [type × 5],
   score, lines, level, combo, b2b, tick, elapsedMs,
-  goalLines, timeLimitMs, topOutReason: 'block'|'lock'|null,
-  stats: { pieces, quads, tspins, perfectClears, maxCombo, holds },
+  goalLines, timeLimitMs, goal, pinLevel, topOutReason: 'block'|'lock'|null,
+  // Bumped by EVERY structural change to the board — lock, clear, Zen sink,
+  // seeded debris, fresh run. The renderer's cached stack layer, the shell's
+  // danger vignette + eviction snapshot, and the audio bed's depth band all
+  // watch it. They used to enumerate the events that ought to accompany a
+  // board change and missed Zen's hold-triggered sink, which emits none.
+  boardRev,
+  // Peaks, not sums: what js/app/store.js's skill records are cut from.
+  // bestLock is the biggest single AWARD and excludes drop points.
+  stats: { pieces, quads, tspins, perfectClears, holds,
+           maxCombo, maxB2b, maxQuadStreak, bestLock },
   events: [ … ],        // drained by the caller each frame
   settings, seed,
 }
@@ -232,7 +251,11 @@ g.events.length = 0;         // the app owns the drain
 ```js
 { type:'move' }                              { type:'rotate', kickIndex }
 { type:'lock', tspin, cells }                { type:'hold' }
-{ type:'clear', rows:[…], count, label, points, b2b, combo, perfectClear }
+{ type:'clear', rows:[…], count, label, points, b2b, combo, perfectClear,
+  b2bChain, quadStreak }   // the two escalation counts — see DESIGN.md §5a.
+                           // b2bChain counts consecutive CHAINING clears (quads
+                           // and T-spin clears); quadStreak counts consecutive
+                           // quads. They break differently, hence two counters.
 { type:'levelup', level }                    { type:'softdrop', rows }
 { type:'harddrop', rows }                    { type:'topout', reason }
 { type:'goal' }                              // Sprint goal met / Ultra time up
@@ -249,8 +272,11 @@ into discrete cell moves. The input layer only translates devices into
 // js/render/index.js
 export function createRenderer(canvases, opts)
 // canvases: { well, hold, next }
-// opts: { theme, fontScale, reducedMotion, powerSaver }   ← plain values, not Arcade
-// → { draw(g), notify(events), resize(), setOpts(partial), dispose() }
+// opts: { theme, fontScale, reducedMotion, powerSaver, glyphs }
+//        ← plain values, not Arcade. The first four are the LAUNCHER's
+//          settings; `glyphs` (DESIGN.md §2.2) is the game's own and arrives
+//          from js/app/store.js through js/main.js, like the ghost does.
+// → { draw(g), notify(events), resize(), setOpts(partial), cellPx(), busy(), dispose() }
 ```
 
 Layer discipline (§6d): a cached background, an offscreen locked-cell layer
@@ -326,11 +352,21 @@ export function saveRun(modeId, snapshot)  // synchronous; safe to call from onS
 export function clearRun(modeId)
 export function recordResult(modeId, r)    // scores.add / records.best / stats.update
 export function loadStats()
+export function loadRecords()              // every stored record, by category
+export function loadSkillRecords()         // the four cross-mode bests, as rows
+export function loadBoard(modeId, opts)    // opts: { limit, dateStr, level }
+export function playerName() / setPlayerName(s)
 export function onExternalChange(fn)       // onStateReplaced + state.onChange, one subscription
 
 // js/app/modes.js — PURE config, no Arcade
-export const MODES                          // { marathon, sprint, ultra, zen, daily }
-export function gameOptsFor(modeId, seed)   // → the opts object createGame() takes
+export const MODES                          // { arcade, marathon, sprint, ultra, zen, daily }
+export const DEFAULT_MODE                   // 'arcade'
+export const DEFAULT_PIN_LEVEL              // 5
+export function gameOptsFor(modeId, seed, opts)   // opts: { pinLevel }
+export function pinLevelOf(v)               // a usable pin, defaulted not rejected
+// A mode declares `pinnable` (the player picks the level — Marathon only) and
+// `skillRecords: false` (Zen: it cannot top out, so nothing there is at risk).
+// scores.keyed is 'date' (Daily), 'level' (Marathon) or false.
 
 // js/app/settings.js — the Arcade.settings bridge, guarded reads
 export function readArcadeSettings()        // → { theme, fontScale, reducedMotion, powerSaver, handedness }

@@ -15,7 +15,7 @@
  * loaded, and for a standalone embed that lost it entirely.
  */
 
-import { COLS, VISIBLE_ROWS, HIDDEN_ROWS, ROWS, GARBAGE_ID } from '../core/constants.js';
+import { COLS, VISIBLE_ROWS, HIDDEN_ROWS, ROWS, GARBAGE_ID, TYPES } from '../core/constants.js';
 
 // ── Palette ──────────────────────────────────────────────────────────────
 
@@ -202,9 +202,75 @@ function surfaceFor(cssW, cssH, scale) {
 
 // ── The block ────────────────────────────────────────────────────────────
 
-// Salvage, not a flat square: a lit top edge, a shaded bottom edge and a seam
-// between neighbours so a solid row still reads as ten separate blocks.
-export function drawBlock(ctx, px, py, size, color, alpha) {
+/* THE ACCESSIBILITY GLYPHS (DESIGN.md §2.2): "a distinct engraved rune so
+ * color is never the only channel."
+ *
+ * The rune is the piece's OWN LETTER. The seven pieces are named after the
+ * shapes of letters and have been for forty years, so the mark a player has to
+ * learn is one they already know — and unlike an arbitrary rune set, seven
+ * letters are guaranteed distinct from each other at a glance. I is drawn as a
+ * bar rather than a serif "I" because a bare vertical stroke at 24 px is
+ * indistinguishable from noise.
+ *
+ * Paths are polylines in a unit box, scaled to the block. Kept as data rather
+ * than as seven draw functions so the engrave pass below is written once.
+ */
+const GLYPHS = {
+    I: [[[0.16, 0.50], [0.84, 0.50]]],
+    O: [[[0.30, 0.30], [0.70, 0.30], [0.70, 0.70], [0.30, 0.70], [0.30, 0.30]]],
+    T: [[[0.22, 0.28], [0.78, 0.28]], [[0.50, 0.28], [0.50, 0.74]]],
+    S: [[[0.74, 0.28], [0.36, 0.28], [0.36, 0.50], [0.64, 0.50], [0.64, 0.72], [0.26, 0.72]]],
+    Z: [[[0.26, 0.28], [0.74, 0.28], [0.28, 0.72], [0.74, 0.72]]],
+    J: [[[0.66, 0.26], [0.66, 0.68], [0.34, 0.68], [0.34, 0.54]]],
+    L: [[[0.36, 0.26], [0.36, 0.72], [0.74, 0.72]]],
+};
+
+/* Below this the groove is thinner than the stroke that would draw it and the
+ * mark reads as dirt on the block rather than as a letter. A phone well at
+ * --font-scale 1.5 lands around 22 px a cell, so this only bites on a
+ * genuinely tiny preview — where the piece's whole SHAPE is visible anyway,
+ * which is the same information the glyph is carrying. */
+const GLYPH_MIN_PX = 11;
+
+// Cut into the surface rather than painted on it: the dark pass sits in the
+// groove and the light pass is the lip catching the light from above, offset
+// by the same direction the block's own top band is lit from.
+function engrave(ctx, x, y, s, color, type) {
+    const paths = GLYPHS[type];
+    if (!paths || s < GLYPH_MIN_PX) return;
+    const lw = Math.max(1, s * 0.11);
+    const prevCap = ctx.lineCap;
+    const prevJoin = ctx.lineJoin;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = lw;
+    for (const pass of [
+        { dx: lw * 0.45, dy: lw * 0.45, stroke: mix(color, 'white', 0.40) },
+        { dx: 0, dy: 0, stroke: mix(color, 'black', 0.52) },
+    ]) {
+        ctx.strokeStyle = pass.stroke;
+        ctx.beginPath();
+        for (const path of paths) {
+            for (let i = 0; i < path.length; i++) {
+                const px2 = x + path[i][0] * s + pass.dx;
+                const py2 = y + path[i][1] * s + pass.dy;
+                if (i === 0) ctx.moveTo(px2, py2);
+                else ctx.lineTo(px2, py2);
+            }
+        }
+        ctx.stroke();
+    }
+    ctx.lineCap = prevCap;
+    ctx.lineJoin = prevJoin;
+}
+
+/* Salvage, not a flat square: a lit top edge, a shaded bottom edge and a seam
+ * between neighbours so a solid row still reads as ten separate blocks.
+ *
+ * `glyph` is the piece type ('I'..'L') when the player has the §2.2 glyph mode
+ * on, and undefined otherwise. Garbage never carries one — it is not a piece,
+ * and stamping it with a letter would be a lie about where it came from. */
+export function drawBlock(ctx, px, py, size, color, alpha, glyph) {
     const a = alpha === undefined ? 1 : alpha;
     if (a <= 0) return;
     const seam = size * 0.07;
@@ -227,6 +293,8 @@ export function drawBlock(ctx, px, py, size, color, alpha) {
     ctx.strokeStyle = mix(color, 'black', 0.55);
     ctx.lineWidth = lw;
     ctx.strokeRect(x + lw / 2, y + lw / 2, s - lw, s - lw);
+
+    if (glyph) engrave(ctx, x, y, s, color, glyph);
 
     if (a !== 1) ctx.globalAlpha = prev;
 }
@@ -403,7 +471,7 @@ function drawDeadLine(ctx, metrics, palette, opts) {
 
 // Field-sized and transparent, so it blits over the background without
 // repainting it. Rebuilt only when the board changes — see index.js.
-export function buildLocked(board, metrics, palette) {
+export function buildLocked(board, metrics, palette, glyphs) {
     const { surf, ctx } = surfaceFor(metrics.w, metrics.h, metrics.scale);
     const cell = metrics.cell;
     let any = false;
@@ -415,7 +483,10 @@ export function buildLocked(board, metrics, palette) {
             const id = board[base + col];
             if (id === 0) continue;
             any = true;
-            drawBlock(ctx, colLeft(metrics, col), py, cell, colorFor(palette, id));
+            // TYPES[id - 1] is undefined for GARBAGE_ID, which is exactly right:
+            // debris is not a piece and carries no letter.
+            drawBlock(ctx, colLeft(metrics, col), py, cell, colorFor(palette, id),
+                1, glyphs ? TYPES[id - 1] : undefined);
         }
     }
 

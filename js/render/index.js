@@ -76,6 +76,10 @@ export function createRenderer(canvases, opts) {
         fontScale: Number(src.fontScale) > 0 ? Number(src.fontScale) : 1,
         reducedMotion: !!src.reducedMotion,
         powerSaver: !!src.powerSaver,
+        // DESIGN.md §2.2 — the accessibility glyph mode. Unlike the four above
+        // it is the GAME's setting, not the launcher's, so it arrives from
+        // js/app/store.js through js/main.js like DAS or the ghost does.
+        glyphs: !!src.glyphs,
     };
 
     const well = (canvases && canvases.well) || null;
@@ -236,21 +240,27 @@ export function createRenderer(canvases, opts) {
         return true;
     }
 
-    // Identity for "what the stack looks like". The board reference catches a
-    // deserialize or a reset that swapped the array; lines and the piece count
-    // catch every mutation core can make to it, since a lock always bumps
-    // stats.pieces and a clear always bumps lines. notify() short-circuits
-    // both by invalidating directly — this is the belt to that pair of braces,
-    // and it costs two number comparisons a frame.
+    /* Identity for "what the stack looks like". The board reference catches a
+     * deserialize or a reset that swapped the array; `boardRev` catches every
+     * mutation core can make to its contents.
+     *
+     * It used to be `lines:pieces`, on the reasoning that a lock always bumps
+     * stats.pieces and a clear always bumps lines — which is true and still
+     * missed a case. Zen's sink drops rows away from under the stack without
+     * locking or clearing anything, and on the holdPiece path it emits no event
+     * either, so both halves of that key held still while the board moved and
+     * this bitmap was drawn rows above where the stack actually was until the
+     * next lock. A counter core bumps at the mutation site cannot miss the next
+     * such path. notify() still short-circuits by invalidating directly; this
+     * is the belt to that brace, and it costs one number comparison a frame. */
     function stackKey(g) {
-        const st = g.stats || null;
-        return (g.lines | 0) + ':' + (st ? st.pieces | 0 : -1);
+        return (g.boardRev | 0);
     }
 
     function ensureLocked(g) {
         const key = stackKey(g);
         if (locked && lockedKey === key && lockedBoard === g.board) return;
-        locked = buildLocked(g.board, metrics, palette);
+        locked = buildLocked(g.board, metrics, palette, cfg.glyphs);
         lockedKey = key;
         lockedBoard = g.board;
     }
@@ -291,11 +301,15 @@ export function createRenderer(canvases, opts) {
     function drawPiecePreviewLayers(g) {
         if (!holdCtx && !nextCtx) return;
         const key = previewSignature(g.hold, g.holdUsed, g.queue, QUEUE_LEN)
-            + '|' + palette.theme;
+            + '|' + palette.theme + '|' + (cfg.glyphs ? 'g' : '-');
         if (key === previewKey) return;
         previewKey = key;
-        if (holdCtx && holdBox.w > 1) drawHold(holdCtx, holdBox, g.hold, !!g.holdUsed, palette);
-        if (nextCtx && nextBox.w > 1) drawQueue(nextCtx, nextBox, g.queue, palette, QUEUE_LEN);
+        if (holdCtx && holdBox.w > 1) {
+            drawHold(holdCtx, holdBox, g.hold, !!g.holdUsed, palette, cfg.glyphs);
+        }
+        if (nextCtx && nextBox.w > 1) {
+            drawQueue(nextCtx, nextBox, g.queue, palette, QUEUE_LEN, cfg.glyphs);
+        }
     }
 
     function drawActive(ctx, g) {
@@ -320,7 +334,8 @@ export function createRenderer(canvases, opts) {
 
         const cells = absoluteCells(piece);
         for (let i = 0; i < cells.length; i++) {
-            drawBlock(ctx, colLeft(metrics, cells[i][0]), rowTop(metrics, cells[i][1]), cell, color);
+            drawBlock(ctx, colLeft(metrics, cells[i][0]), rowTop(metrics, cells[i][1]), cell,
+                color, 1, cfg.glyphs ? piece.type : undefined);
         }
     }
 
@@ -407,6 +422,10 @@ export function createRenderer(canvases, opts) {
             if ('powerSaver' in partial) {
                 const ps = !!partial.powerSaver;
                 if (ps !== cfg.powerSaver) { cfg.powerSaver = ps; repaint = true; }
+            }
+            if ('glyphs' in partial) {
+                const gl = !!partial.glyphs;
+                if (gl !== cfg.glyphs) { cfg.glyphs = gl; repaint = true; }
             }
             if (!repaint) return;
             fx.setOpts(cfg);

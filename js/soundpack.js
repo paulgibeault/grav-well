@@ -253,11 +253,23 @@
         // absent on a Single, where nothing meaningful moves.
         'clear': function (ctx, o, t, p, r) {
             const count = Math.max(1, Math.min(4, (p && p.count) | 0 || 1));
+            /* THE COMBO LADDER. `combo` is the chain length — 1 for the first
+             * clear of a chain, which is every clear, so 1 has to sound exactly
+             * like the cue always did or the whole game gets louder.
+             *
+             * It raises the FRACTURE PITCH rather than the level. A chain is
+             * not a bigger event than a single clear, it is a faster one, and
+             * the genre's answer to that has always been pitch: the same break
+             * heard tighter and tighter as the well runs out of slack. Capped
+             * at 12 because the curve is exponential and an unbounded chain
+             * would eventually put the shatter above hearing. */
+            const combo = Math.max(1, Math.min(12, (p && p.combo) | 0 || 1));
+            const rung = Math.pow(1.055, combo - 1);
             const at = seed(r);
             S.shatter(ctx, o, t, {
                 grains: 24 + 16 * count,
                 dur: (0.32 + 0.09 * count) * S.between(r, 0.90, 1.12),
-                f0: S.between(r, 2400, 3100),
+                f0: S.between(r, 2400, 3100) * rung,
                 bright: 1 - 0.06 * (count - 1),
                 ring: S.between(r, 0.9, 1.3),
                 skew: S.between(r, 2.0, 2.6),   // dense at the fracture, thinning as they fall
@@ -274,6 +286,27 @@
                     gain: EVENT * 0.30 * (0.5 + count / 4), seed: at + 1,
                 });
             }
+            /* The pawl, from the second clear of a chain. One detent per link,
+             * climbing with the ladder — the mechanism at the rim counting the
+             * chain out loud, which is the one thing in the pack that tells the
+             * player how long the chain is without them reading the rail.
+             *
+             * It rides the LEADING edge, a hair before the shatter, because it
+             * is the well anticipating the break rather than answering it; and
+             * it stays at PIECE level, not EVENT, because it fires under a cue
+             * that is already the loudest thing in the mix. */
+            if (combo >= 2) {
+                S.ratchet(ctx, o, t + S.between(r, 0.005, 0.012), {
+                    detents: Math.min(6, combo),
+                    dur: 0.030 + 0.014 * Math.min(6, combo),
+                    end: S.between(r, 0.62, 0.78),   // accelerating: it is winding UP
+                    jitter: 0.04,
+                    f: S.between(r, 600, 780) * rung,
+                    hp: S.between(r, 2200, 2800),
+                    gain: PIECE * (0.80 + 0.10 * Math.min(5, combo - 1)),
+                    seed: at + 2,
+                });
+            }
             return 1.2 + 0.2 * count;
         },
 
@@ -288,18 +321,56 @@
         // edge (0.18) to remember that something broke. No `tone` either: the
         // ringing shell the element can add is heard as a struck bell, and this
         // well has no bell in it.
+        /* SUCCESSIVE QUADS ESCALATE, and they escalate DOWNWARD.
+         *
+         * The obvious lever is level, and it is the wrong one: `quad` is
+         * already the loudest cue in the pack and §6 spends a paragraph on
+         * keeping it restrained. So the streak buys DEPTH instead — the blast
+         * grows, the rumble lengthens, and both bottom frequencies fall, which
+         * is the shaft answering from further down each time rather than the
+         * game shouting. Level moves too, but by half what size does.
+         *
+         * From the third in a row a SECOND blast lands a fifth of a second
+         * behind the first, quieter and lower still: the far end of the well
+         * catching up. That is the moment the escalation stops being a trim on
+         * one sound and becomes an event of its own, which is right — three
+         * quads in a row is not a common thing to have done.
+         *
+         * Capped at five. The curve is linear in `k` and an uncapped streak
+         * would eventually ask for a gain the bus has to limit, which reads as
+         * the mix breaking rather than as the player doing well.
+         */
         'quad': function (ctx, o, t, p, r) {
+            const streak = Math.max(1, Math.min(5, (p && p.streak) | 0 || 1));
+            const k = (streak - 1) / 4;         // 0 on the first, 1 on the fifth
+            const at = seed(r);
             S.blast(ctx, o, t + S.between(r, 0.02, 0.05), {
-                size: S.between(r, 1.15, 1.35),
-                gain: 0.115,                    // restrained, per §6 — it is already the loudest thing
-                crack: 0.18,
+                size: S.between(r, 1.15, 1.35) * (1 + 0.34 * k),
+                gain: 0.115 * (1 + 0.42 * k),   // restrained, per §6 — it is already the loudest thing
+                crack: 0.18 + 0.09 * k,
                 attack: S.between(r, 0.030, 0.050),
-                rumble: 1.35,
-                f0: S.between(r, 1500, 1900), f1: S.between(r, 120, 160), lp: 1300,
-                wf0: S.between(r, 88, 108),
-                seed: seed(r),
+                rumble: 1.35 + 0.80 * k,
+                f0: S.between(r, 1500, 1900),
+                f1: S.between(r, 120, 160) * (1 - 0.30 * k),
+                lp: 1300,
+                wf0: S.between(r, 88, 108) * (1 - 0.24 * k),
+                seed: at,
             });
-            return 3.0;
+            if (streak >= 3) {
+                S.blast(ctx, o, t + S.between(r, 0.20, 0.27), {
+                    size: S.between(r, 1.30, 1.55),
+                    gain: 0.115 * 0.52 * (0.6 + 0.4 * k),
+                    crack: 0.05,                // no snap at all down there
+                    attack: S.between(r, 0.055, 0.085),
+                    rumble: 2.10,
+                    f0: S.between(r, 900, 1200),
+                    f1: S.between(r, 62, 84),
+                    lp: 900,
+                    wf0: S.between(r, 54, 68),
+                    seed: at + 1,
+                });
+            }
+            return 3.0 + 1.4 * k;
         },
 
         // A Singularity — the perfect clear, and the rarest thing in the game

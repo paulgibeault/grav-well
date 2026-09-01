@@ -1,4 +1,4 @@
-/* The five modes of DESIGN.md §3, pinned as configuration.
+/* The six modes of DESIGN.md §3, pinned as configuration.
  *
  * This suite imports js/app/modes.js AND NOTHING ELSE. That is the property
  * worth protecting: modes.js sits in js/app/, the layer that may touch the
@@ -8,10 +8,12 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MODES, MODE_IDS, DEFAULT_MODE, gameOptsFor } from '../js/app/modes.js';
+import {
+    MODES, MODE_IDS, DEFAULT_MODE, DEFAULT_PIN_LEVEL, gameOptsFor, pinLevelOf,
+} from '../js/app/modes.js';
 
 // The opts keys js/core/game.js's createGame() reads, and nothing else.
-const OPT_KEYS = ['mode', 'seed', 'goalLines', 'timeLimitMs', 'goal', 'garbageRows'];
+const OPT_KEYS = ['mode', 'seed', 'goalLines', 'timeLimitMs', 'goal', 'garbageRows', 'pinLevel'];
 
 // The endings a mode can declare. Core checks them in this order on the same
 // tick and emits one `goal` event whichever fires, so a mode declaring two
@@ -20,8 +22,12 @@ const endingsOf = (o) => [o.goalLines, o.timeLimitMs, o.goal].filter((v) => v !=
 
 const isCount = (v) => Number.isInteger(v) && v > 0;
 
-test('the table is exactly the five modes of §3', () => {
-    assert.deepEqual(MODE_IDS, ['marathon', 'sprint', 'ultra', 'zen', 'daily']);
+test('the table is exactly the six modes of §3', () => {
+    // Arcade first, and it is the default: it is the game somebody who has
+    // never played this before should land in. Marathon asks a question — which
+    // level? — that only means something once you know how fast level 8 is.
+    assert.deepEqual(MODE_IDS, ['arcade', 'marathon', 'sprint', 'ultra', 'zen', 'daily']);
+    assert.equal(DEFAULT_MODE, 'arcade');
     assert.deepEqual(Object.keys(MODES), MODE_IDS);
     for (const id of MODE_IDS) assert.equal(MODES[id].id, id, id + ' knows its own id');
     assert.ok(MODES[DEFAULT_MODE], 'the default mode is in the table');
@@ -37,6 +43,7 @@ test('every mode produces a valid createGame opts object', () => {
         assert.ok(o.timeLimitMs === null || isCount(o.timeLimitMs), id + ' timeLimitMs');
         assert.ok(o.goal === null || o.goal === 'garbage', id + ' goal');
         assert.ok(Number.isInteger(o.garbageRows) && o.garbageRows >= 0, id + ' garbageRows');
+        assert.ok(o.pinLevel === null || isCount(o.pinLevel), id + ' pinLevel');
         // createGame() treats undefined and null differently in exactly one
         // place — optCount() stores null so the value survives a snapshot's
         // JSON round trip. An absent key would deserialize as undefined.
@@ -69,8 +76,10 @@ test('the modes with no declared ending are exactly the two that end on top-out'
     // reaching zero is a mode that lost its goal by accident and would run
     // forever with no way to finish.
     //
-    //   Marathon — the standard endless game: levels climb with no finish
+    //   Arcade   — the standard endless game: levels climb with no finish
     //              line, and the run is over when the stack tops out.
+    //   Marathon — endless for a different reason: the level is PINNED, so the
+    //              curve never arrives to end it. Still ends on a top-out.
     //   Zen      — endless AND unloseable: js/core/game.js softens both
     //              top-out paths on `g.mode === 'zen'`, so the well sinks
     //              instead. It is the one mode where "ends on top-out" is
@@ -78,7 +87,7 @@ test('the modes with no declared ending are exactly the two that end on top-out'
     //
     // Everything else has to say what finishes it, or a player cannot know.
     const endless = MODE_IDS.filter((id) => endingsOf(gameOptsFor(id, 1)).length === 0);
-    assert.deepEqual(endless, ['marathon', 'zen']);
+    assert.deepEqual(endless, ['arcade', 'marathon', 'zen']);
     for (const id of MODE_IDS) {
         if (endless.includes(id)) continue;
         assert.equal(endingsOf(gameOptsFor(id, 1)).length, 1, id + ' must declare its ending');
@@ -107,25 +116,93 @@ test('Ultra is a clock with no line goal', () => {
     assert.equal(MODES.ultra.record.direction, 'higher');
 });
 
-test('Marathon is the endless standard game on a score board', () => {
-    const o = gameOptsFor('marathon', 1);
+test('Arcade is the endless standard game on a score board', () => {
+    const o = gameOptsFor('arcade', 1);
     // §3, amended 2026-08-22: no finish line. It shipped as 150 lines with a
     // deferred "Endless" toggle; the toggle is gone and the goal with it,
     // because the standard game IS the endless one and a mode does not need a
-    // setting to say so.
+    // setting to say so. Renamed from Marathon 2026-08-31 — the RULES did not
+    // move, only the name, because "Marathon" was needed for the mode that
+    // actually lets you run one.
     assert.equal(o.goalLines, null, '§3: no line goal — the run ends on a top-out');
     assert.equal(o.timeLimitMs, null);
     assert.equal(o.goal, null);
     assert.equal(o.garbageRows, 0);
+    assert.equal(o.pinLevel, null, 'the curve is the mode: nothing is pinned');
     // Nothing about how the run is FILED changed. js/app/store.js gates on
     // `won` only for a time metric, so a score-metric mode that ends on a
     // top-out has always counted — which is what lets the goal go without
     // touching store.js.
-    assert.equal(MODES.marathon.metric, 'score');
-    assert.equal(MODES.marathon.scores.category, 'marathon');
+    assert.equal(MODES.arcade.metric, 'score');
+    assert.equal(MODES.arcade.scores.category, 'arcade');
+    assert.equal(MODES.arcade.scores.order, 'desc');
+    assert.equal(MODES.arcade.scores.keyed, false);
+    assert.equal(MODES.arcade.record.category, 'arcade-score');
+    assert.equal(MODES.arcade.record.direction, 'higher');
+    // NOT the legacy `marathon` / `marathon-score` categories. Those hold
+    // scores set under the old name and the SDK has no rename; re-using them
+    // would mix escalating runs into the pinned board forever.
+    assert.notEqual(MODES.arcade.scores.category, MODES.marathon.scores.category);
+});
+
+test('Marathon pins the level, and only Marathon does', () => {
+    // The mode IS the pin: there is no other difference from Arcade, which is
+    // why `pinnable` is the whole declaration and core's pinLevel does the work.
+    assert.deepEqual(MODE_IDS.filter((id) => MODES[id].pinnable), ['marathon']);
+    for (const id of MODE_IDS) {
+        assert.equal(typeof MODES[id].pinnable, 'boolean', id + ' declares pinnable');
+    }
+
+    const o = gameOptsFor('marathon', 1, { pinLevel: 8 });
+    assert.equal(o.pinLevel, 8);
+    assert.equal(o.goalLines, null, 'no finish line — the level is what stops moving');
+    assert.equal(o.timeLimitMs, null);
+    assert.equal(o.goal, null);
+
+    // A pinnable mode handed nothing still pins. null on a pinnable mode does
+    // not mean "no preference", it means the level climbs — and silently
+    // turning Marathon back into Arcade is the one outcome nobody asked for.
+    assert.equal(gameOptsFor('marathon', 1).pinLevel, DEFAULT_PIN_LEVEL);
+    for (const bad of [null, undefined, NaN, 'eight', {}, 0, -3]) {
+        assert.equal(gameOptsFor('marathon', 1, { pinLevel: bad }).pinLevel,
+            DEFAULT_PIN_LEVEL, String(bad));
+    }
+    assert.equal(pinLevelOf(12), 12);
+
+    // The pin is IGNORED, not rejected, by a mode that is not pinnable: the
+    // menu holds one stored level and hands it over on every launch.
+    for (const id of MODE_IDS) {
+        if (id === 'marathon') continue;
+        assert.equal(gameOptsFor(id, 1, { pinLevel: 9 }).pinLevel, null, id);
+    }
+});
+
+test('the Marathon board is partitioned by level, the way the Daily is by date', () => {
+    // A table mixing level-2 runs with level-15 runs is not a leaderboard, it
+    // is a pile — the same problem the Daily Well solves by keying on the day.
+    assert.equal(MODES.marathon.scores.keyed, 'level');
+    assert.equal(MODES.daily.scores.keyed, 'date');
     assert.equal(MODES.marathon.scores.order, 'desc');
-    assert.equal(MODES.marathon.record.category, 'marathon-score');
-    assert.equal(MODES.marathon.record.direction, 'higher');
+    // And the personal best is per level too, created lazily by the first run
+    // at that level rather than nineteen empty categories up front.
+    assert.equal(MODES.marathon.record.perLevel, true);
+    assert.equal(MODES.marathon.record.category, 'marathon');
+    for (const id of MODE_IDS) {
+        const r = MODES[id].record;
+        if (!r || id === 'marathon') continue;
+        assert.notEqual(r.perLevel, true, id + ' keeps one record, not a family');
+    }
+});
+
+test('Zen is the one mode that files no skill records', () => {
+    /* Best combo, longest back-to-back, longest quad streak and biggest single
+     * clear are records because they were built UNDER THREAT. Zen cannot top
+     * out, so a combo there can be assembled at leisure with the stack at the
+     * ceiling — filing those beside a combo built in a real run would retire
+     * all four categories permanently on the first Zen session. */
+    assert.equal(MODES.zen.skillRecords, false);
+    const off = MODE_IDS.filter((id) => MODES[id].skillRecords === false);
+    assert.deepEqual(off, ['zen']);
 });
 
 test('Zen has neither ending, and the mode id is what disables top-out', () => {
@@ -154,7 +231,7 @@ test('the Daily Well starts buried and ends when it is clean', () => {
     // §3/§7: one board, keyed by the day, ascending because it is a time race.
     assert.equal(MODES.daily.scores.category, 'daily');
     assert.equal(MODES.daily.scores.order, 'asc');
-    assert.equal(MODES.daily.scores.keyed, true);
+    assert.equal(MODES.daily.scores.keyed, 'date');
     assert.equal(MODES.daily.seedSource, 'daily');
 });
 
@@ -231,7 +308,7 @@ test('a missing or unusable seed falls back to 0, like createGame does', () => {
 
 test('an unknown mode id opens as the default instead of throwing', () => {
     // A snapshot from a build with a mode this one lacks, or a hand-edited
-    // save: the player gets Marathon, not a white screen.
+    // save: the player gets Arcade, not a white screen.
     for (const bad of ['versus', '', null, undefined, '__proto__', 'toString']) {
         assert.deepEqual(gameOptsFor(bad, 5), gameOptsFor(DEFAULT_MODE, 5), String(bad));
     }
@@ -268,11 +345,13 @@ test('the fleet category names are spelled once, here', () => {
     // them; a typo is a leaderboard nobody can find. DESIGN.md §7, verbatim.
     const scores = MODE_IDS.filter((id) => MODES[id].scores)
         .map((id) => MODES[id].scores.category);
-    assert.deepEqual(scores, ['marathon', 'ultra', 'daily']);
+    assert.deepEqual(scores, ['arcade', 'marathon', 'ultra', 'daily']);
 
+    // `marathon` is a STEM here, not a finished category: js/app/store.js
+    // appends the level (`marathon-l8`) because record.perLevel is set.
     const records = MODE_IDS.filter((id) => MODES[id].record)
         .map((id) => MODES[id].record.category);
-    assert.deepEqual(records.sort(), ['marathon-score', 'sprint-40', 'ultra-score']);
+    assert.deepEqual(records.sort(), ['arcade-score', 'marathon', 'sprint-40', 'ultra-score']);
 
     for (const id of MODE_IDS) {
         const r = MODES[id].record;
@@ -291,7 +370,11 @@ test('a time race sorts ascending and a score board descending', () => {
         const s = MODES[id].scores;
         if (!s) continue;
         assert.equal(s.order, MODES[id].metric === 'time' ? 'asc' : 'desc', id);
-        // Only a board with more than one entry per player needs an entry key.
-        assert.equal(s.keyed, id === 'daily', id);
+        /* A board is keyed when its rows are not comparable to each other:
+         * the Daily Well by the day, Marathon by the pinned level. Arcade and
+         * Ultra are one flat ranking each, so an entry key there would only
+         * partition a board that has no partitions. */
+        const want = id === 'daily' ? 'date' : (id === 'marathon' ? 'level' : false);
+        assert.equal(s.keyed, want, id);
     }
 });
