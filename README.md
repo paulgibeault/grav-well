@@ -115,10 +115,19 @@ keyboard is unaffected — ↑/X and Z/Ctrl stay CW and CCW, and stay remappable
 ```
 
 ```sh
-npm test                  # contract gates + the full unit suite
+npm test                  # repo gates + the full unit suite
 node tools/stage.mjs dist # build the deploy artifact
 node tools/verify-artifact.mjs
 PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node tools/build-icon.mjs
+```
+
+The **fleet contract gates** (§5 attention pulses, §6d idle, the guarded
+`powerSaver()` read) live in the launcher repo and are fetched by CI, so
+`npm test` does not run them — which means a violation is only visible after a
+push. To check before you push, point them at this checkout:
+
+```sh
+node ../paulgibeault.github.io/tools/contract-gates.mjs .
 ```
 
 The rules engine in `js/core/` is pure — no DOM, no SDK, no wall clock, and

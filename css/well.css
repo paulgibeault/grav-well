@@ -331,7 +331,14 @@ body {
 #v-combo[data-heat="blaze"] { color: var(--accent); }
 #v-combo[data-heat="nova"] {
   color: var(--accent);
-  animation: combo-nova 900ms ease-in-out var(--arcade-pulse-count, 3);
+  /* LONGHANDS, never the `animation` shorthand. A var() inside the shorthand
+     becomes a pending-substitution value: invisible to CSSOM, and one bad
+     token kills the whole animation rather than just the count. Same rule as
+     the banner below, and the fleet gate checks for it. */
+  animation-name: combo-nova;
+  animation-duration: 900ms;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: var(--arcade-pulse-count, 3);
 }
 @keyframes combo-nova {
   0%, 100% { opacity: 1; }
@@ -485,7 +492,13 @@ body {
   animation-duration: 260ms, 640ms;
   animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1), ease-in-out;
   animation-delay: 0s, 260ms;
-  animation-iteration-count: 1, var(--arcade-pulse-count, 2);
+  /* The fallback is 3, not a smaller count of our own choosing (§5, and the
+     fleet contract gate enforces it): the token IS the player's power-saver
+     lever — 3 normally, 1 saving, 0 under reduced motion — and picking a
+     literal here would opt this pulse out of the lever entirely. A shorter
+     flash than `record` gets is expressed in the DURATION instead, which is
+     ours to set. */
+  animation-iteration-count: 1, var(--arcade-pulse-count, 3);
 }
 
 @keyframes heat-swell {
