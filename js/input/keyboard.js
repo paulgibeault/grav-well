@@ -17,9 +17,14 @@
 
 import { COMMANDS, sanitizeKeymap, resolveCode, codeFromEvent, isAction } from './keymap.js';
 
-// Pressing Control necessarily sets ev.ctrlKey on its own keydown, so the
-// bare-Control rotate binding cannot be judged by the modifier rule below.
-const SELF_MODIFIER = new Set(['ControlLeft', 'ControlRight']);
+/* Which modifier flag each modifier KEY raises. Pressing Control necessarily
+ * sets ev.ctrlKey on its own keydown, so a bare-Control binding cannot be
+ * judged by the chord rule below without knowing that. */
+const MODIFIER_FLAG = {
+    ControlLeft: 'ctrlKey', ControlRight: 'ctrlKey',
+    MetaLeft: 'metaKey', MetaRight: 'metaKey',
+    AltLeft: 'altKey', AltRight: 'altKey',
+};
 
 export function attachKeyboard(target, handlers, keymap) {
     const el = target || (typeof window !== 'undefined' ? window : null);
@@ -47,11 +52,26 @@ export function attachKeyboard(target, handlers, keymap) {
         const name = code && resolveCode(code, map);
         if (!name) return;      // not ours — never swallow a key we do not own
 
-        // A chord belongs to the browser: Ctrl+R reloads, Cmd+W closes,
-        // Alt+ArrowLeft goes back. Shift deliberately does NOT veto — it is
-        // the HOLD binding, so it is legitimately down during play and must
-        // not mute the arrow keys while a player holds it.
-        if ((ev.ctrlKey || ev.metaKey || ev.altKey) && !SELF_MODIFIER.has(code)) return;
+        /* A chord belongs to the browser: Ctrl+R reloads, Cmd+W closes,
+         * Alt+ArrowLeft goes back. Shift deliberately does NOT veto — it is the
+         * HOLD binding, so it is legitimately down during play and must not
+         * mute the arrow keys while a player holds it.
+         *
+         * CONTROL NEEDS THE SAME EXEMPTION, AND THE OLD RULE ONLY HALF GAVE IT.
+         * Ctrl is the shipped CCW binding, and the veto exempted only Control's
+         * OWN keydown — so for as long as a player held it to rotate, every
+         * arrow, Space and soft drop was read as a browser chord and dropped.
+         * Worse, the veto returned before preventDefault, so those arrows
+         * scrolled the page instead.
+         *
+         * A modifier we are HOLDING AS A GAME ACTION is not a chord modifier.
+         * But that exemption is granted to ACTIONS only, never to commands:
+         * Ctrl+ArrowLeft has to move the piece, and Ctrl+R still has to reload
+         * the page — a player reaching for a browser chord is reaching for a
+         * letter, and the game's letters are all commands. */
+        const chord = ['ctrlKey', 'metaKey', 'altKey'].some(
+            (flag) => ev[flag] && !modifierIsOurs(flag, code, name));
+        if (chord) return;
 
         // Consumed from here on. preventDefault comes BEFORE the repeat check
         // because a held arrow keeps firing repeats and each one would scroll
@@ -69,6 +89,20 @@ export function attachKeyboard(target, handlers, keymap) {
         if (isAction(name)) press(name);
         else if (name === COMMANDS.PAUSE) pause();
         else if (name === COMMANDS.RETRY) retry();
+    }
+
+    /* Is `flag` raised by a key WE own, rather than by the player reaching for
+     * a browser shortcut? True when the key being pressed is itself that
+     * modifier (its own keydown always raises its own flag), or when we are
+     * already holding one that raises it — but in the second case only for an
+     * action, so command bindings never shadow a browser chord. */
+    function modifierIsOurs(flag, code, name) {
+        if (MODIFIER_FLAG[code] === flag) return true;
+        if (!isAction(name)) return false;
+        for (const mod of Object.keys(MODIFIER_FLAG)) {
+            if (MODIFIER_FLAG[mod] === flag && held.has(mod)) return true;
+        }
+        return false;
     }
 
     function onKeyUp(ev) {

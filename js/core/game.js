@@ -28,9 +28,10 @@ import { detectTSpin } from './tspin.js';
 import { LOCK_DELAY_MS, MAX_LOCK_RESETS, MAX_G, fallIntervalMs, levelFor } from './gravity.js';
 import { scoreLock, dropPoints } from './score.js';
 import { createBag } from './bag.js';
+import { normalizeSettings, newStats, MAX_SDF } from './norm.js';
 import { makeRng } from '../arcade-rng.js';
 
-export { serialize, deserialize } from './serialize.js';
+export { serialize, deserialize, SNAPSHOT_VERSION } from './serialize.js';
 
 const QUEUE_LEN = 5;
 
@@ -56,19 +57,14 @@ const MAX_STEPS_PER_UPDATE = 12;
  * rather than growing an array without bound for the length of a run. */
 const MAX_EVENTS = 1024;
 
-/* "Instant" soft drop (§2.8) as a finite number. JSON turns Infinity into
- * null, and a snapshot has to survive JSON; 1200x reaches gravity.js's
- * twenty-rows-a-tick ceiling at level 1 — the slowest gravity in the game — so
- * naming it costs nothing and every faster setting is the same drop. */
-const MAX_SDF = 1200;
-
-const DEFAULT_SETTINGS = { das: 167, arr: 33, sdf: 20, ghost: true, lockdown: 'extended' };
-
 export function createGame(opts) {
     const o = opts || {};
     const g = {
         // --- the contract's surface (ARCHITECTURE.md) ---
-        mode: typeof o.mode === 'string' ? o.mode : 'marathon',
+        // Only ever a fallback — js/app/modes.js always passes one. 'arcade' so
+        // core's default is the standard escalating game rather than the
+        // level-pinned mode that now carries the Marathon name.
+        mode: typeof o.mode === 'string' ? o.mode : 'arcade',
         phase: 'playing',
         board: createBoard(),
         active: null,
@@ -79,6 +75,13 @@ export function createGame(opts) {
         score: 0, lines: 0, level: 1, combo: 0, b2b: false,
         tick: 0, elapsedMs: 0,
         goalLines: optCount(o.goalLines),
+        /* The pinned level (§3). null is the standard escalating curve — Arcade,
+         * Sprint, Ultra, Daily. A number FREEZES the level for the whole run: the
+         * run starts there, levelFor() is never consulted, and no 'levelup' is
+         * ever emitted. That is the entire mechanism behind Marathon, and it
+         * lives here rather than in a mode table because the level is the one
+         * thing gravity, scoring and the HUD all read. */
+        pinLevel: optLevel(o.pinLevel),
         timeLimitMs: optCount(o.timeLimitMs),
         goal: normalizeGoal(o.goal),
         topOutReason: null,
@@ -89,6 +92,20 @@ export function createGame(opts) {
 
         // --- the reducer's bookkeeping ---
         garbageRows: Math.min(Math.max(0, Math.floor(Number(o.garbageRows) || 0)), VISIBLE_ROWS),
+        /* Bumped by EVERY structural change to the board — a lock, a clear, a
+         * Zen sink, the Daily Well's debris, a fresh run.
+         *
+         * It exists because the event stream is not a complete account of when
+         * the board moves, and three consumers were quietly assuming it was.
+         * js/render/index.js keyed its cached stack bitmap on `lines:pieces`,
+         * js/main.js refreshed the danger vignette and wrote the eviction
+         * snapshot only on lock/clear/topout, and js/app/audio.js re-banded the
+         * bed on the same two — so ZEN'S HOLD-TRIGGERED SINK, which drops rows
+         * away and emits nothing but a 'hold', left all three stale until the
+         * next lock: the stack drawn rows above where it actually was. Watching
+         * a counter instead of enumerating the events that ought to bump it
+         * makes the next such path correct by default. */
+        boardRev: 0,
         bag: null,          // live; serialize.js rebuilds it from seed + state
         leftoverMs: 0,      // sub-tick remainder of the last update()
         fallMs: 0,          // gravity accumulator
@@ -96,6 +113,14 @@ export function createGame(opts) {
         lockResets: 0,
         lowestY: 0,         // deepest row this piece has reached
         lastKickIndex: -1,  // the caller half of the T-spin rule (tspin.js)
+        /* Two chain counters the score table does not need but the celebration
+         * does. `b2bChain` counts consecutive CHAINING clears (quads and T-spin
+         * clears) — so a chain of 3 has fired the x1.5 twice — and `quadStreak`
+         * counts consecutive QUADS specifically. They are separate because they
+         * break differently: a T-spin double extends the b2b chain and ends the
+         * quad streak. Both ride out on the 'clear' event. */
+        b2bChain: 0,
+        quadStreak: 0,
         held: newHeld(),
         dir: 0,             // -1 / 0 / +1: the direction currently auto-shifting
         dasMs: 0,           // ms left before auto-shift engages
@@ -469,6 +494,7 @@ function lockPiece(g) {
     const tspin = detectTSpin(g.board, p, g.lastKickIndex);
 
     lockCells(g.board, cells, ID[p.type] || GARBAGE_ID);
+    g.boardRev++;
     g.active = null;
     g.ghostY = -1;
     g.stats.pieces++;
@@ -485,7 +511,7 @@ function lockPiece(g) {
 
     const rows = fullRows(g.board);
     const count = rows.length;
-    if (count > 0) clearRows(g.board, rows);
+    if (count > 0) { clearRows(g.board, rows); g.boardRev++; }
     // Perfect clear is asked of the board AFTER the rows are gone — before
     // them, the well is never empty.
     const perfect = count > 0 && isEmpty(g.board);
@@ -499,21 +525,40 @@ function lockPiece(g) {
     });
     g.score += res.points;
     g.b2b = res.b2b;            // the flag is score.js's to decide, ours to keep
+    // The biggest single award of the run. Drop points are deliberately not in
+    // it: they are a function of how far the piece fell, not of what the player
+    // built, and a 20-row hard drop would out-rank every T-spin in the game.
+    if (res.points > g.stats.bestLock) g.stats.bestLock = res.points;
 
     if (count > 0) {
         g.combo = prior + 1;    // the chain length, which is what a HUD shows
         if (g.combo > g.stats.maxCombo) g.stats.maxCombo = g.combo;
+        /* res.b2b IS score.js's `chains` whenever lines > 0 (a no-clear lock is
+         * the only case where the returned flag is just the incoming one), so
+         * the chain length can be kept here without score.js growing a field.
+         * A plain Single/Double/Triple lands false and cuts the chain. */
+        g.b2bChain = res.b2b ? g.b2bChain + 1 : 0;
+        if (g.b2bChain > g.stats.maxB2b) g.stats.maxB2b = g.b2bChain;
+        g.quadStreak = count === 4 ? g.quadStreak + 1 : 0;
+        if (g.quadStreak > g.stats.maxQuadStreak) g.stats.maxQuadStreak = g.quadStreak;
         g.lines += count;
         if (count === 4) g.stats.quads++;
         if (perfect) g.stats.perfectClears++;
         emit(g, {
             type: 'clear', rows: rows, count: count, label: res.label,
             points: res.points, b2b: res.b2b, combo: g.combo, perfectClear: perfect,
+            // The two escalation counts. js/render/fx.js, js/app/audio.js and
+            // the banner all read them; nothing here decides what they mean.
+            b2bChain: g.b2bChain, quadStreak: g.quadStreak,
         });
-        const next = levelFor(g.lines);
-        if (next > g.level) {
-            g.level = next;
-            emit(g, { type: 'levelup', level: next });
+        // A pinned run never levels up — that is what pinned means — so the
+        // curve is never consulted and no cue ever fires for it.
+        if (g.pinLevel == null) {
+            const next = levelFor(g.lines);
+            if (next > g.level) {
+                g.level = next;
+                emit(g, { type: 'levelup', level: next });
+            }
         }
     } else {
         g.combo = 0;
@@ -573,7 +618,12 @@ function sinkStack(g, fits) {
     // Drop the floor row away and let the stack follow it down, one row at a
     // time, until the predicate is satisfied. Bounded by the height of the
     // well — an empty well satisfies both callers.
-    for (let i = 0; i < ROWS && !fits(); i++) clearRows(g.board, [ROWS - 1]);
+    //
+    // The revision bump is what tells the renderer, the danger hook and the
+    // audio bed that this happened. There is no event for it — the vocabulary
+    // is frozen — and on the holdPiece path there is no lock behind it either,
+    // which is exactly the case that used to leave all three stale.
+    for (let i = 0; i < ROWS && !fits(); i++) { clearRows(g.board, [ROWS - 1]); g.boardRev++; }
 }
 
 function topOut(g, reason) {
@@ -607,12 +657,18 @@ function startRun(g) {
     // and the renderer hold references to both, and a retry must not orphan
     // them.
     g.board.fill(0);
+    g.boardRev++;
     g.active = null;
     g.ghostY = -1;
     g.hold = null;
     g.holdUsed = false;
     g.queue = [];
-    g.score = 0; g.lines = 0; g.level = 1; g.combo = 0; g.b2b = false;
+    g.score = 0; g.lines = 0; g.combo = 0; g.b2b = false;
+    // A pinned run STARTS at its level rather than climbing to it: picking the
+    // speed you want to play at forever is the whole point of the mode, and
+    // making you grind ten levels to reach it would be a different one.
+    g.level = g.pinLevel == null ? 1 : g.pinLevel;
+    g.b2bChain = 0; g.quadStreak = 0;
     g.tick = 0; g.elapsedMs = 0;
     g.phase = 'playing'; g.topOutReason = null;
     g.stats = newStats();
@@ -657,6 +713,7 @@ function seedGarbage(g) {
         const step9 = rng.int(0, COLS - 2);
         hole = step9 >= hole ? step9 + 1 : step9;
     }
+    g.boardRev++;
 }
 
 // ---------------------------------------------------------------------------
@@ -667,10 +724,6 @@ function emit(g, event) {
     if (g.events.length < MAX_EVENTS) g.events.push(event);
 }
 
-function newStats() {
-    return { pieces: 0, quads: 0, tspins: 0, perfectClears: 0, maxCombo: 0, holds: 0 };
-}
-
 function newHeld() {
     return {
         LEFT: false, RIGHT: false, CW: false, CCW: false,
@@ -678,32 +731,27 @@ function newHeld() {
     };
 }
 
-function normalizeSettings(s) {
-    const o = s || {};
-    return {
-        // The upper clamps are JSON-safety as much as sanity: a snapshot has to
-        // survive a stringify, and Infinity does not.
-        das: numOr(o.das, DEFAULT_SETTINGS.das, 0, 5000),
-        arr: numOr(o.arr, DEFAULT_SETTINGS.arr, 0, 1000),
-        sdf: numOr(o.sdf, DEFAULT_SETTINGS.sdf, 1, MAX_SDF),
-        ghost: o.ghost == null ? DEFAULT_SETTINGS.ghost : !!o.ghost,
-        lockdown: (o.lockdown === 'classic' || o.lockdown === 'infinite')
-            ? o.lockdown : DEFAULT_SETTINGS.lockdown,
-    };
-}
-
-function numOr(v, dflt, min, max) {
-    if (v == null) return dflt;
-    const n = Number(v);
-    if (Number.isNaN(n)) return dflt;
-    return n < min ? min : (n > max ? max : n);
-}
-
 /* The goals that are not a number. Validated against a known set rather than
  * stored as handed over: a typo would otherwise create a run that simply never
  * ends, which is the hardest kind of mode bug to see. */
 function normalizeGoal(v) {
     return v === 'garbage' ? 'garbage' : null;
+}
+
+/* A pinned level, or null for the escalating curve.
+ *
+ * Clamped to the range the curve actually distinguishes. Level 19 is where
+ * gravity.js reaches the true 20G floor and pins there, so every level above it
+ * is the same game at the same speed — offering 40 of them would be offering
+ * twenty-one identical choices and calling them different.
+ */
+export const MAX_PIN_LEVEL = 19;
+
+function optLevel(v) {
+    if (v == null) return null;
+    const n = Math.floor(Number(v));
+    if (!Number.isFinite(n)) return null;
+    return n < 1 ? 1 : (n > MAX_PIN_LEVEL ? MAX_PIN_LEVEL : n);
 }
 
 // Absent is null, never undefined: undefined does not survive JSON, and these

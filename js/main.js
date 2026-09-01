@@ -33,7 +33,10 @@
  * preference, and a Performance trace is how it is checked.
  */
 
-import { createGame, update, press, release, serialize, deserialize } from './core/game.js';
+import {
+    createGame, update, press, release, serialize, deserialize,
+    MAX_PIN_LEVEL, SNAPSHOT_VERSION,
+} from './core/game.js';
 import { ACTIONS, ROWS } from './core/constants.js';
 import { highestRow } from './core/board.js';
 import { createRenderer } from './render/index.js';
@@ -72,6 +75,11 @@ const TITLE_MS = 1000;
 const FALLBACK_SETTINGS = {
     das: 167, arr: 33, sdf: 20, ghost: true, lockdown: 'extended',
     scheme: 'gesture', bed: true, flick: 1, tapRotate: 'cw', keymap: null,
+    // §2.2 — the accessibility glyph mode. Colour is never the only channel.
+    glyphs: false,
+    // §3 — the level Marathon pins itself at. Not a core setting: it is a mode
+    // OPT, so it goes through modes.gameOptsFor() rather than coreSettings().
+    pinLevel: 5,
 };
 
 /* Every call into js/app/store.js goes through here.
@@ -130,6 +138,7 @@ async function boot() {
         s.sdf = clamp(s.sdf, 1, 1200, FALLBACK_SETTINGS.sdf);
         s.ghost = s.ghost !== false;
         s.bed = s.bed !== false;
+        s.glyphs = !!s.glyphs;
         s.scheme = s.scheme === 'buttons' ? 'buttons' : 'gesture';
         // §4 flick sensitivity. The range is js/input/touch.js's, restated
         // because the settings slider is drawn from these bounds too — and
@@ -139,6 +148,9 @@ async function boot() {
         // §4 — tap rotation direction. Two legal values and no third meaning,
         // so an unknown one is the default rather than a throw.
         s.tapRotate = s.tapRotate === 'ccw' ? 'ccw' : 'cw';
+        // Core clamps it again on the way into createGame(); this is so the
+        // menu's level picker cannot be handed a value with no <option>.
+        s.pinLevel = Math.round(clamp(s.pinLevel, 1, MAX_PIN_LEVEL, FALLBACK_SETTINGS.pinLevel));
         if (s.lockdown !== 'classic' && s.lockdown !== 'infinite') s.lockdown = 'extended';
         return s;
     }
@@ -178,6 +190,7 @@ async function boot() {
         fontScale: arc.fontScale,
         reducedMotion: arc.reducedMotion,
         powerSaver: arc.powerSaver,
+        glyphs: settings.glyphs,
     });
 
     const audio = createAudio({ powerSaver: arc.powerSaver, bedEnabled: settings.bed });
@@ -238,6 +251,11 @@ async function boot() {
     let lastTitle = '';
     let titleAt = 0;
     let rebootQueued = false;
+    // The results payload, kept so closing Settings can put the card back.
+    let lastOver = null;
+    // The board revision this shell last reacted to. -1 so the first frame of
+    // a run always counts as a change.
+    let lastBoardRev = -1;
 
     const loop = A && typeof A.loop === 'function'
         ? A.loop(frame)
@@ -277,19 +295,23 @@ async function boot() {
      * frame(), above the `length = 0`) for the same reason the other two do. */
     function drainAppEvents(g) {
         const ev = g.events;
-        let boardMoved = false;
+        /* The board's own revision, not the events that usually accompany it.
+         * Zen's sink moves the stack with nothing but a 'hold' behind it, and
+         * the danger vignette and the eviction snapshot were both keyed off
+         * lock/clear/topout — so a sunk well kept its warning glow and the
+         * snapshot on disk kept the pre-sink board. */
+        const rev = g.boardRev | 0;
+        let boardMoved = rev !== lastBoardRev;
+        lastBoardRev = rev;
         let announced = false;
         for (let i = 0; i < ev.length; i++) {
             const e = ev[i];
-            if (e.type === 'lock' || e.type === 'topout') {
+            if (e.type === 'topout') {
                 boardMoved = true;
             } else if (e.type === 'clear') {
                 boardMoved = true;
-                if (e.perfectClear) { ui.banner('SINGULARITY', 'record'); announced = true; }
-                else if (e.label) {
-                    ui.banner(e.label + (e.combo > 1 ? ' ×' + e.combo : ''));
-                    announced = true;
-                }
+                const text = clearBanner(e);
+                if (text) { ui.banner(text, clearHeat(e)); announced = true; }
             } else if (e.type === 'levelup' && !announced) {
                 ui.banner('LEVEL ' + e.level);
                 announced = true;
@@ -301,6 +323,38 @@ async function boot() {
         // evicted iframe is a destroyed heap, and the most a player can then
         // lose is the piece that was in the air.
         saveNow();
+    }
+
+    /* What the banner says about one clear.
+     *
+     * THREE FACTS, NOT ONE NUMBER WITH THREE MEANINGS. The old line appended
+     * "×N" for the combo, and a quad streak wants the same suffix — so a
+     * "B2B QUAD ×3" would have meant the third quad in a row on one lock and a
+     * three-clear chain on the next, with nothing on screen to tell them
+     * apart. The streak keeps the bare ×, because it is a multiplier ON the
+     * label it follows; the chain gets its own word, because it is not.
+     */
+    function clearBanner(e) {
+        if (e.perfectClear) return 'SINGULARITY';
+        let s = e.label || '';
+        if (e.quadStreak > 1) s += ' \u00d7' + e.quadStreak;
+        if (e.combo > 1) s = s ? s + ' \u00b7 COMBO ' + e.combo : 'COMBO ' + e.combo;
+        return s;
+    }
+
+    /* How hard it should land. One ladder, shared with the combo readout and
+     * the FX layer (ui.heatFor), so a chain that is showing as `blaze` in the
+     * rail does not arrive as a polite grey banner over the well.
+     *
+     * A quad streak is worth roughly three combo steps: quads are rarer and
+     * the streak is harder to hold, so a second quad in a row should read
+     * louder than a second clear in a chain. Whichever of the two is hotter
+     * wins — they are two ways of being on a run, not two runs to add up. */
+    function clearHeat(e) {
+        if (e.perfectClear) return 'record';
+        const streak = e.quadStreak > 1 ? e.quadStreak * 3 : 0;
+        const n = Math.max(streak, e.combo > 1 ? e.combo : 0);
+        return n >= 2 && typeof ui.heatFor === 'function' ? ui.heatFor(n) : '';
     }
 
     function refreshDanger(g) {
@@ -333,6 +387,7 @@ async function boot() {
             level: g.level,
             clockMs: remaining ? Math.max(0, g.timeLimitMs - g.elapsedMs) : g.elapsedMs,
             clockLabel: remaining ? 'Left' : 'Time',
+            combo: g.combo,
         });
         if (playing) setTitle(g);
     }
@@ -391,6 +446,18 @@ async function boot() {
     }
 
     function onRetryKey() {
+        /* GATED ON THE SCREEN, because R means "retry THIS run" and on a
+         * settled screen there is no this-run to retry. Ungated it reached the
+         * menu, where `instantRetry` modes (Sprint, Ultra) took it literally
+         * and launched a fresh run straight past the menu the player was
+         * standing in — and where everything else popped "Restart this run?"
+         * over a run nobody had started.
+         *
+         * The settings screen is excluded too: its own key-capture listener
+         * runs in the CAPTURE phase and stops propagation while a rebind is
+         * armed, but the rest of the time R would reach here and throw the
+         * player out of the screen they were configuring. */
+        if (screen !== 'playing' && screen !== 'paused' && screen !== 'over') return;
         // The input layer fires this on the key edge and cannot express "are
         // you sure" — a key edge is not a held gesture. The confirmation is the
         // app's, which is what Arcade.ui.confirm is for.
@@ -423,7 +490,7 @@ async function boot() {
     }
 
     function defaultModeId() {
-        return typeof modes.DEFAULT_MODE === 'string' ? modes.DEFAULT_MODE : 'marathon';
+        return typeof modes.DEFAULT_MODE === 'string' ? modes.DEFAULT_MODE : 'arcade';
     }
 
     function modeIds() {
@@ -431,20 +498,30 @@ async function boot() {
         return Object.keys(modes.MODES || { marathon: 1 });
     }
 
-    function menuData() {
+    function menuData(focus) {
         return {
             selected: modeId,
+            focus: focus || null,
+            maxPinLevel: MAX_PIN_LEVEL,
             modes: modeIds().map((id) => {
                 const m = modeFor(id);
                 return {
                     id: id,
                     name: m.name || id,
                     blurb: m.blurb || '',
+                    // A pinnable mode draws a level picker beside its row and
+                    // shows THAT level's record rather than the mode's.
+                    pinnable: !!m.pinnable,
+                    pinLevel: settings.pinLevel,
                     resumable: !!loadSnapshot(id),
                 };
             }),
             stats: safe(() => (typeof store.loadStats === 'function' ? store.loadStats() : null), null),
             records: personalBests(),
+            // The four cross-mode bests, for the foot. Inside the launcher the
+            // Records sheet shows these too; the standalone page has no sheet.
+            skills: typeof store.loadSkillRecords === 'function'
+                ? (safe(() => store.loadSkillRecords(), null) || []) : [],
         };
     }
 
@@ -488,6 +565,7 @@ async function boot() {
 
     function toMenu() {
         started = false;
+        lastOver = null;
         releaseAllActions();
         audio.stop();
         ui.setDanger(false);
@@ -505,6 +583,7 @@ async function boot() {
 
     function startMode(id, fresh) {
         modeId = id;
+        lastOver = null;
         prepareGame(id, fresh);
         if (!game) return;
         started = true;
@@ -559,8 +638,14 @@ async function boot() {
         else if (wasPlaying) resumePlay();
     }
 
+    /* Settings opens from EVERY settled screen and returns to the one it was
+     * opened from — menu, pause card, results card. `lastOver` is why the
+     * results case works: that card is built from a run object that endRun()
+     * has already finished with, so there is nothing left to rebuild it from
+     * and the payload has to be kept. */
     function openSettings() {
-        settingsFrom = screen === 'paused' ? 'paused' : 'menu';
+        settingsFrom = screen === 'paused' ? 'paused'
+            : (screen === 'over' ? 'over' : 'menu');
         if (screen === 'playing') { pausePlay(); settingsFrom = 'paused'; }
         showSettings();
     }
@@ -584,8 +669,9 @@ async function boot() {
     }
 
     function closeSettings() {
-        if (settingsFrom === 'paused' && game) setScreen('paused', runData(game));
-        else setScreen('menu', menuData());
+        if (settingsFrom === 'paused' && game) { setScreen('paused', runData(game)); return; }
+        if (settingsFrom === 'over' && lastOver) { setScreen('over', lastOver); return; }
+        setScreen('menu', menuData());
     }
 
     // ── settings changes ─────────────────────────────────────────────────
@@ -604,6 +690,20 @@ async function boot() {
         if (key === 'tapRotate') touch.setOpts({ tapRotate: settings.tapRotate });
         if (key === 'bed') audio.setOpts({ bedEnabled: settings.bed });
         if (key === 'ghost') kick();
+        // Every cached bitmap carries the glyphs, so this is a full rebuild —
+        // which setOpts does for us, and then redraws once.
+        if (key === 'glyphs') renderer.setOpts({ glyphs: settings.glyphs });
+        /* The pinned level changes what the row above the picker SAYS — the
+         * "Best" caption is that level's record — so the menu is rebuilt, and
+         * focus is handed straight back to the control the player is still
+         * using. It also invalidates any prepared-but-unstarted run, because
+         * that run was built at the old level; `started` guards the reload so
+         * a run actually in progress is never swapped out from under a player
+         * who reached Settings through the pause card. */
+        if (key === 'pinLevel') {
+            if (!started && modeFor(modeId).pinnable) prepareGame(modeId, false);
+            if (screen === 'menu') ui.show('menu', menuData('.mode-level'));
+        }
     }
 
     // Re-run the same clamping the loader does, over an object we already hold.
@@ -614,9 +714,12 @@ async function boot() {
         merged.sdf = clamp(merged.sdf, 1, 1200, FALLBACK_SETTINGS.sdf);
         merged.ghost = merged.ghost !== false;
         merged.bed = merged.bed !== false;
+        merged.glyphs = !!merged.glyphs;
         merged.scheme = merged.scheme === 'buttons' ? 'buttons' : 'gesture';
         merged.flick = clamp(merged.flick, 0.4, 3, FALLBACK_SETTINGS.flick);
         merged.tapRotate = merged.tapRotate === 'ccw' ? 'ccw' : 'cw';
+        merged.pinLevel = Math.round(
+            clamp(merged.pinLevel, 1, MAX_PIN_LEVEL, FALLBACK_SETTINGS.pinLevel));
         if (merged.lockdown !== 'classic' && merged.lockdown !== 'infinite') merged.lockdown = 'extended';
         return merged;
     }
@@ -692,6 +795,13 @@ async function boot() {
         // the results are filed, so this only catches a save that predates that
         // (or an import of one).
         if (!snap || (snap.phase && snap.phase !== 'playing')) return null;
+        /* And neither is one this build cannot read. deserialize() is the
+         * authority and answers null for a stale version — but it is called a
+         * screen later, and without this check the menu would advertise
+         * "Run in progress" for a save that silently starts fresh when tapped.
+         * The v1→v2 bump is exactly that case: every stored Marathon run
+         * predates the mode meaning something different. */
+        if (snap.v !== SNAPSHOT_VERSION) return null;
         return snap;
     }
 
@@ -713,7 +823,7 @@ async function boot() {
         const seed = seedFor(id);
         let opts = null;
         if (typeof modes.gameOptsFor === 'function') {
-            opts = safe(() => modes.gameOptsFor(id, seed), null);
+            opts = safe(() => modes.gameOptsFor(id, seed, { pinLevel: settings.pinLevel }), null);
         }
         if (!opts || typeof opts !== 'object') opts = { mode: id, seed: seed };
         // gameOptsFor deliberately returns no `settings`: DAS/ARR/SDF/ghost/
@@ -737,6 +847,9 @@ async function boot() {
         }
         if (!game) game = createGame(optsFor(id));
         if (game) refreshDanger(game);
+        // The new game has its own revision counter, so the shell's baseline
+        // has to be re-taken or the first frame reads as "nothing moved".
+        lastBoardRev = game ? (game.boardRev | 0) : -1;
         lastTitle = '';
     }
 
@@ -763,7 +876,11 @@ async function boot() {
         if (res.improved) toast('New best!', 'success');
 
         const remaining = g.timeLimitMs != null;
-        setScreen('over', {
+        /* KEPT, not just shown. endRun() is finished with `g` by the time the
+         * card is up — the run is filed and cleared — so if the player opens
+         * Settings from here there is nothing left to rebuild the card from.
+         * closeSettings() puts this exact payload back. */
+        lastOver = {
             modeName: m.name || modeId,
             title: won ? (m.metric === 'time' ? 'Dug out' : 'Run complete') : 'Topped out',
             subtitle: won ? (m.name || modeId)
@@ -779,18 +896,47 @@ async function boot() {
              * textContent and never innerHTML (§7b — a bug class this fleet has
              * shipped and fixed twice). A name like `"><img src=x onerror=…>`
              * lands as inert text. */
-            scores: boardFor(modeId, res),
-            scoreTitle: 'Best runs',
+            scores: boardFor(modeId, res, g),
+            scoreTitle: m.pinnable ? 'Best runs at level ' + g.level : 'Best runs',
             scoreFormat: m.metric === 'time' ? 'duration-ms' : 'integer',
-        });
+            // What the run was interesting FOR, and every skill record it beat.
+            highlights: highlightsFor(g),
+            beaten: Array.isArray(res.beaten) ? res.beaten : [],
+        };
+        setScreen('over', lastOver);
         clearTitle();
+    }
+
+    /* The run's own tallies, as display rows — only the ones that happened.
+     *
+     * Order is by how hard it is to do rather than by how the stats object is
+     * spelled: a quad streak is a rarer thing than a T-spin count, and the
+     * first line of this list is the one a player reads. A run with none of
+     * them produces an empty array and js/app/ui.js drops the whole section,
+     * which is right — a card reading "T-spins 0" is a scolding, not a stat. */
+    function highlightsFor(g) {
+        const st = (g && g.stats) || {};
+        const rows = [
+            [st.maxQuadStreak > 1, 'Quad streak', '\u00d7' + st.maxQuadStreak],
+            [st.quads > 0, st.quads === 1 ? 'Quad' : 'Quads', String(st.quads)],
+            [st.maxCombo > 1, 'Best combo', '\u00d7' + st.maxCombo],
+            [st.maxB2b > 1, 'Back-to-back', '\u00d7' + st.maxB2b],
+            [st.perfectClears > 0, 'Singularities', String(st.perfectClears)],
+            [st.tspins > 0, 'T-spins', String(st.tspins)],
+            [st.bestLock > 0, 'Biggest clear', Number(st.bestLock).toLocaleString('en-US')],
+        ];
+        return rows.filter((r) => r[0]).map((r) => ({ label: r[1], text: r[2] }));
     }
 
     /* The ranked board for a mode, or the single entry just filed when the mode
      * has no board (Sprint keeps a personal record and no leaderboard). */
-    function boardFor(id, res) {
+    function boardFor(id, res, g) {
         if (typeof store.loadBoard === 'function') {
-            const list = safe(() => store.loadBoard(id, { limit: 5 }), null);
+            // A level-keyed board (Marathon) is asked for the level the run was
+            // actually played at, which is not necessarily the one the picker
+            // is showing: a resumed run keeps the level it was started with.
+            const level = g && g.pinLevel != null ? g.pinLevel : settings.pinLevel;
+            const list = safe(() => store.loadBoard(id, { limit: 5, level: level }), null);
             if (Array.isArray(list) && list.length) return list;
         }
         return res && res.entry ? [res.entry] : [];
@@ -887,6 +1033,7 @@ async function boot() {
             scheme: settings.scheme, flick: settings.flick, tapRotate: settings.tapRotate,
         });
         audio.setOpts({ bedEnabled: settings.bed });
+        renderer.setOpts({ glyphs: settings.glyphs });
         applyCoreSettings();
         if (screen === 'settings') showSettings();
         kick();
@@ -910,6 +1057,7 @@ async function boot() {
             arc = readArcade();
             touch.setOpts({ scheme: settings.scheme, handedness: arc.handedness });
             audio.setOpts({ powerSaver: arc.powerSaver, bedEnabled: settings.bed });
+            renderer.setOpts({ glyphs: settings.glyphs });
             game = null;
             toMenu();
         }, 0);

@@ -15,12 +15,18 @@
  * game.js and the import can stay one-directional.
  */
 
-import { COLS, ROWS, ACTIONS } from './constants.js';
+import { COLS, ROWS, ACTIONS, GARBAGE_ID } from './constants.js';
 import { createBoard } from './board.js';
 import { createBag } from './bag.js';
+import { normalizeSettings, normalizeStats } from './norm.js';
 import { makeRng } from '../arcade-rng.js';
 
-export const SNAPSHOT_VERSION = 1;
+/* Bumped to 2 when Marathon became the level-pinned mode and the old escalating
+ * one was renamed Arcade. A v1 snapshot carries `mode: 'marathon'` with no
+ * `pinLevel` and a level that climbed — resuming it under the new rules would
+ * silently file an escalating run to the pinned board. deserialize() answers
+ * null for it instead, which every caller already handles as "start fresh". */
+export const SNAPSHOT_VERSION = 2;
 
 /* Everything on the state object that is already JSON-shaped and is copied
  * across verbatim. The structured fields (board, active, queue, stats,
@@ -33,7 +39,7 @@ const PLAIN_KEYS = [
     'score', 'lines', 'level', 'combo', 'b2b', 'tick', 'elapsedMs',
     'goalLines', 'timeLimitMs', 'goal', 'topOutReason', 'garbageRows',
     'leftoverMs', 'fallMs', 'lockMs', 'lockResets', 'lowestY', 'lastKickIndex',
-    'dir', 'dasMs', 'arrMs',
+    'dir', 'dasMs', 'arrMs', 'pinLevel', 'b2bChain', 'quadStreak', 'boardRev',
 ];
 
 export function serialize(g) {
@@ -73,8 +79,18 @@ export function deserialize(obj) {
     for (let i = 0; i < PLAIN_KEYS.length; i++) g[PLAIN_KEYS[i]] = obj[PLAIN_KEYS[i]];
     g.active = copyPiece(obj.active);
     g.queue = Array.isArray(obj.queue) ? obj.queue.slice() : [];
-    g.stats = Object.assign({}, obj.stats);
-    g.settings = Object.assign({}, obj.settings);
+    /* NORMALIZED, not copied, and this is the half that used to be missing.
+     * createGame() clamps every setting on the way in; this door did not, so a
+     * snapshot — which carries `{ sync: true }`, and therefore arrives from the
+     * player's other devices, an imported save, or a hand edit — could restore
+     * a game the constructor would have refused. A restored `sdf: -1` makes the
+     * fall interval negative, which falls through game.js's `interval > 0`
+     * guard into twenty rows a tick; a restored `das: 'banana'` makes
+     * `dasMs > 0` false forever so DAS never charges. Both silent, both only
+     * for the player holding the bad save. js/core/norm.js is now the single
+     * definition of a legal block and both doors go through it. */
+    g.settings = normalizeSettings(obj.settings);
+    g.stats = normalizeStats(obj.stats);
     // Rebuilt from ACTIONS rather than copied, because press()/release() gate
     // on the key EXISTING in this map. A snapshot with a partial or missing
     // `held` — a hand-edited save, an export from another version, a truncated
@@ -103,9 +119,14 @@ function encodeBoard(board) {
     const out = new Array(board.length);
     for (let i = 0; i < board.length; i++) {
         const v = board[i];
-        // Ids never exceed 8. Clamping rather than throwing keeps a corrupt
-        // cell from costing the player the whole save.
-        out[i] = String(v >= 0 && v <= 9 ? v : 9);
+        /* Ids never exceed GARBAGE_ID. Clamping rather than throwing keeps a
+         * corrupt cell from costing the player the whole save — and it clamps
+         * to EMPTY rather than to 9, which was a value nothing could render:
+         * charFor() spells it '#', colorFor() falls back to the garbage hue,
+         * and the cell would sit in the well forever looking like debris that
+         * the Daily Well's dig goal would never count. Losing one corrupt cell
+         * is the smaller lie. */
+        out[i] = String(v >= 0 && v <= GARBAGE_ID ? v : 0);
     }
     return out.join('');
 }
@@ -115,8 +136,10 @@ function decodeBoard(s) {
     const board = createBoard();
     for (let i = 0; i < s.length; i++) {
         const v = s.charCodeAt(i) - 48;     // '0'
-        if (v < 0 || v > 9) return null;
-        board[i] = v;
+        if (v < 0 || v > 9) return null;    // not a digit at all: not our string
+        // A digit above GARBAGE_ID can only come from a save written before the
+        // clamp above, or from an edit. Same answer as encode: empty.
+        board[i] = v > GARBAGE_ID ? 0 : v;
     }
     return board;
 }

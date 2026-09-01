@@ -37,7 +37,7 @@
  * than the toast — a custom listener that merely logs is a downgrade.
  */
 
-import { modeFor } from './modes.js';
+import { modeFor, pinLevelOf } from './modes.js';
 
 // DESIGN.md §8. Two keys and one stats category is the whole schema.
 const SETTINGS_KEY = 'settings';
@@ -100,6 +100,12 @@ function settingsDefaults() {
          * so there is exactly one value here and no way to store a pair that
          * disagrees with itself (js/input/touch.js, rotationPair). */
         tapRotate: 'cw',
+        /* §3 — the level Marathon pins itself at. Stored rather than asked for
+         * on every launch: it is a statement about how fast this player likes
+         * to play, not a per-run decision, and it is also the key the Marathon
+         * leaderboard is filed under, so it has to survive a reload or the
+         * player's board moves out from under them. */
+        pinLevel: 5,
         bed: true,                          // §6 — the sustained well-hum
         /* §4, keyed on event.code. ONLY THE PLAYER'S OVERRIDES ARE STORED —
          * js/input/keymap.js owns DEFAULT_KEYMAP and merges a stored map over
@@ -203,13 +209,18 @@ export function clearRun(modeId) {
 function statsDefaults() {
     return {
         gamesPlayed: 0,
-        modes: { marathon: 0, sprint: 0, ultra: 0, zen: 0, daily: 0 },
+        modes: { arcade: 0, marathon: 0, sprint: 0, ultra: 0, zen: 0, daily: 0 },
         lines: 0,
         pieces: 0,
         quads: 0,
         tspins: 0,
         perfectClears: 0,
+        // Peaks, not sums. A lifetime total of combos says nothing about
+        // whether this player can build one; the best they ever built does.
         maxCombo: 0,
+        maxB2b: 0,
+        maxQuadStreak: 0,
+        bestLock: 0,
         playMs: 0,
         // §3: the Daily Well tracks a streak. `lastDate` is a device-local
         // 'YYYY-MM-DD' from Arcade.daily.dateStr() — see dayBefore() below.
@@ -254,6 +265,51 @@ function withStatsDefaults(prev) {
     return s;
 }
 
+/* THE SKILL RECORDS (§7, added 2026-08-31).
+ *
+ * Four things a run can be interesting for that its score does not say. A
+ * 40 000-point Arcade run and a 40 000-point Arcade run are the same row on the
+ * board; one of them got there on a seven-quad back-to-back chain and the other
+ * ground it out in singles, and only these four categories can tell them apart.
+ *
+ * They are CROSS-MODE on purpose. "The best combo you have ever built" is a
+ * fact about the player, not about Ultra — splitting it five ways would give
+ * five easy records instead of one hard one, and the launcher's Records sheet
+ * would fill with near-duplicates. The one exclusion is Zen (`skillRecords:
+ * false` in js/app/modes.js), which cannot top out and would retire all four on
+ * the first leisurely session.
+ *
+ * `source` names the field on the run's stats block, so adding a fifth category
+ * is one row here and one counter in js/core/game.js's newStats().
+ */
+const SKILL_RECORDS = [
+    {
+        source: 'maxCombo',
+        category: 'best-combo',
+        label: 'Best combo',
+        // The banner the celebration puts up when this one moves.
+        crow: 'Longest combo yet',
+    },
+    {
+        source: 'maxB2b',
+        category: 'best-b2b',
+        label: 'Longest back-to-back',
+        crow: 'Longest back-to-back yet',
+    },
+    {
+        source: 'maxQuadStreak',
+        category: 'best-quad-streak',
+        label: 'Longest quad streak',
+        crow: 'Longest quad streak yet',
+    },
+    {
+        source: 'bestLock',
+        category: 'best-lock',
+        label: 'Biggest single clear',
+        crow: 'Biggest clear yet',
+    },
+];
+
 // ---------------------------------------------------------------------------
 // filing a finished run — DESIGN.md §7's three-way split
 // ---------------------------------------------------------------------------
@@ -293,14 +349,19 @@ export function recordResult(modeId, r) {
     const run = normalizeResult(r);
     const out = {
         mode: mode.id, counted: false, improved: false,
-        dateStr: null, record: null, entry: null, stats: null,
+        dateStr: null, key: null, record: null, entry: null, stats: null,
+        // Every skill record the run touched, and the subset it actually beat.
+        // js/main.js reads `beaten` to decide what the results card crows about.
+        skills: [], beaten: [],
     };
     if (!A) return out;
 
     const dateStr = (typeof r === 'object' && r && typeof r.dateStr === 'string')
         ? r.dateStr
         : today(A);
-    if (mode.scores && mode.scores.keyed) out.dateStr = dateStr;
+    if (mode.scores && mode.scores.keyed === 'date') out.dateStr = dateStr;
+    const entryKey = scoreKey(mode, run, dateStr);
+    out.key = entryKey;
 
     const timed = mode.metric === 'time';
     const value = timed ? run.elapsedMs : run.score;
@@ -316,26 +377,63 @@ export function recordResult(modeId, r) {
          * a second opinion about the player's name. */
         out.entry = A.scores.add(mode.scores.category, {
             score: value,
-            key: mode.scores.keyed ? dateStr : undefined,
+            key: entryKey == null ? undefined : entryKey,
+            /* The meta is what makes a board row say HOW the score was made.
+             * It rides the SDK's cross-device merge with the entry, so a row
+             * synced from a phone still knows it was three quads. */
             meta: {
                 mode: mode.id,
                 lines: run.lines,
                 level: run.level,
+                pinLevel: run.pinLevel,
                 elapsedMs: run.elapsedMs,
                 won: run.won,
+                quads: run.quads,
+                maxCombo: run.maxCombo,
+                maxB2b: run.maxB2b,
+                tspins: run.tspins,
+                perfectClears: run.perfectClears,
             },
         }, { order: mode.scores.order });
     }
 
     if (out.counted && mode.record) {
-        const res = A.records.best(mode.record.category, {
+        const category = recordCategory(mode, run);
+        const res = A.records.best(category, {
             value: value,
             direction: mode.record.direction,
             format: mode.record.format,
-            label: mode.record.label,
+            label: recordLabel(mode, run),
         });
         out.improved = !!(res && res.improved);
-        out.record = Object.assign({ category: mode.record.category }, res && res.record);
+        out.record = Object.assign({ category: category }, res && res.record);
+    }
+
+    /* The four skill records, filed for every mode that can top out — a Sprint
+     * abandoned on line 12 still built whatever combo it built, so unlike the
+     * mode record these are NOT gated on `counted`. Zero is not filed at all:
+     * records.best() on a fresh category would otherwise create four categories
+     * reading 0 for a player who has never cleared a line, and the launcher's
+     * Records sheet would render all four. */
+    if (mode.skillRecords !== false) {
+        for (const spec of SKILL_RECORDS) {
+            const v = run[spec.source];
+            if (!(v > 0)) continue;
+            const res = A.records.best(spec.category, {
+                value: v,
+                direction: 'higher',
+                format: 'integer',
+                label: spec.label,
+            });
+            const rec = Object.assign(
+                { category: spec.category, label: spec.label, crow: spec.crow, value: v },
+                res && res.record);
+            out.skills.push(rec);
+            if (res && res.improved) {
+                out.improved = true;
+                out.beaten.push(rec);
+            }
+        }
     }
 
     // Counters roll up for EVERY finished run, qualifying or not — Zen has no
@@ -351,6 +449,9 @@ export function recordResult(modeId, r) {
         s.tspins += run.tspins;
         s.perfectClears += run.perfectClears;
         s.maxCombo = Math.max(s.maxCombo | 0, run.maxCombo);
+        s.maxB2b = Math.max(s.maxB2b | 0, run.maxB2b);
+        s.maxQuadStreak = Math.max(s.maxQuadStreak | 0, run.maxQuadStreak);
+        s.bestLock = Math.max(s.bestLock | 0, run.bestLock);
         s.playMs += run.elapsedMs;
         if (mode.id === 'daily' && run.won) bumpStreak(s.daily, dateStr);
         return s;
@@ -374,12 +475,48 @@ function normalizeResult(r) {
         // Ultra's clock. Accept an explicit boolean too, for a caller that has
         // already reduced the run to a result.
         won: typeof o.won === 'boolean' ? o.won : o.phase === 'won',
+        // The pinned level, when there is one. Read off the run rather than
+        // off `level`, so only a genuinely pinned run can key a board by it.
+        pinLevel: (o.pinLevel == null ? null : count(o.pinLevel)) || null,
         pieces: count(st.pieces),
         quads: count(st.quads),
         tspins: count(st.tspins),
         perfectClears: count(st.perfectClears),
         maxCombo: count(st.maxCombo),
+        maxB2b: count(st.maxB2b),
+        maxQuadStreak: count(st.maxQuadStreak),
+        bestLock: count(st.bestLock),
     };
+}
+
+/* What a keyed leaderboard files this run under, or null for a flat one.
+ *
+ * One category per mode, partitioned by key, is the SDK's shape — the Daily
+ * Well has always used it for the date. Marathon uses the same machinery for
+ * the pinned level, because the two boards have the same problem: rows that are
+ * not comparable must not share a ranking. Both keys are short strings so the
+ * 100-entry cap is spent on rows, not on formatting.
+ */
+function scoreKey(mode, run, dateStr) {
+    const keyed = mode.scores && mode.scores.keyed;
+    if (keyed === 'date') return dateStr;
+    if (keyed === 'level') return 'L' + (run.pinLevel || run.level || 1);
+    return null;
+}
+
+/* A per-level mode gets a record category per level (`marathon-l8`), created
+ * lazily by records.best() the first time that level is played — so the player
+ * who lives at level 8 carries one record and not nineteen. The label carries
+ * the level too, which is what lets the launcher's Records sheet render it with
+ * no per-game code. */
+function recordCategory(mode, run) {
+    if (!mode.record.perLevel) return mode.record.category;
+    return mode.record.category + '-l' + (run.pinLevel || run.level || 1);
+}
+
+function recordLabel(mode, run) {
+    if (!mode.record.perLevel) return mode.record.label;
+    return mode.record.label + ' — level ' + (run.pinLevel || run.level || 1);
 }
 
 function count(v) {
@@ -391,11 +528,15 @@ function count(v) {
  * the device-local calendar day — the platform rule (§7c), which exists
  * because two games once disagreed about "today" over exactly this. */
 function bumpStreak(d, dateStr) {
+    // Every completed dig is a play, including a second one on a day already
+    // counted. The counter sat inside the same-day guard below, so it was
+    // silently a count of DAYS rather than of plays — which is what `streak`
+    // and `best` are already for.
+    d.plays = (d.plays | 0) + 1;
     if (!dateStr || d.lastDate === dateStr) return;   // today is already counted
     d.streak = (d.lastDate && d.lastDate === dayBefore(dateStr)) ? (d.streak | 0) + 1 : 1;
     d.lastDate = dateStr;
     d.best = Math.max(d.best | 0, d.streak);
-    d.plays = (d.plays | 0) + 1;
 }
 
 /* 'YYYY-MM-DD' → the day before it, by CALENDAR rather than by arithmetic.
@@ -447,7 +588,7 @@ const SCORES_CAP = 100;
  * earlier day.
  *
  * @param {string} modeId
- * @param {{limit?: number, dateStr?: string}} [opts]
+ * @param {{limit?: number, dateStr?: string, level?: number}} [opts]
  * @returns {Array<{rank:number, score:number, name:string, ts:number,
  *                  key:?string, meta:?object}>} empty for a mode with no board
  *          (Sprint keeps a record, Zen keeps neither) — never null, so the
@@ -462,11 +603,15 @@ export function loadBoard(modeId, opts) {
     if (n === 0) return [];
 
     const keyed = mode.scores.keyed;
-    // Filter first, THEN take n: slicing to n and filtering after would return
-    // three of today's times because seven of yesterday's were faster.
-    const day = keyed ? (typeof o.dateStr === 'string' ? o.dateStr : today(A)) : null;
+    /* Filter first, THEN take n: slicing to n and filtering after would return
+     * three of today's times because seven of yesterday's were faster — and the
+     * same for three of your level-8 runs because seven level-2 runs scored
+     * higher. `want` is the partition this call is asking about. */
+    let want = null;
+    if (keyed === 'date') want = typeof o.dateStr === 'string' ? o.dateStr : today(A);
+    else if (keyed === 'level') want = 'L' + pinLevelOf(o.level);
     const raw = A.scores.list(mode.scores.category, { limit: keyed ? SCORES_CAP : n });
-    const rows = keyed ? raw.filter((e) => e && e.key === day) : raw;
+    const rows = keyed ? raw.filter((e) => e && e.key === want) : raw;
 
     // Rebuilt field by field rather than passed through. The SDK stamps a
     // hidden `dev`/`eid` on every entry for its cross-device merge and says
@@ -482,8 +627,35 @@ export function loadBoard(modeId, opts) {
 }
 
 /**
+ * The four skill records, in table order, as display rows.
+ *
+ * Separate from loadRecords() because they are a different question. That one
+ * answers "what is my best in each MODE", which the menu files under the mode
+ * that earned it; this one answers "what is the best I have ever PLAYED", which
+ * belongs to the player rather than to any row. Inside a launcher the Records
+ * sheet renders both from the SDK with no help from us — this exists so the
+ * standalone page, which has no such sheet, can still show them.
+ *
+ * @returns {Array<{category:string, label:string, value:number}>} only the ones
+ *          actually set; empty on a fresh install, so the caller can render
+ *          nothing rather than four zeroes.
+ */
+export function loadSkillRecords() {
+    const all = loadRecords();
+    const out = [];
+    for (const spec of SKILL_RECORDS) {
+        const r = all && all[spec.category];
+        const v = r && Number(r.value);
+        if (!(v > 0)) continue;
+        out.push({ category: spec.category, label: spec.label, value: Math.floor(v) });
+    }
+    return out;
+}
+
+/**
  * Every personal best this game has stored, keyed by category — `sprint-40`,
- * `marathon-score`, `ultra-score` as they exist (an unplayed mode has none).
+ * `arcade-score`, `marathon-l8` as they exist (an unplayed mode has none, and a
+ * pinnable mode has one per level actually played).
  *
  * Returned as the SDK stores them, because a record is SELF-DESCRIBING by
  * design: each carries its own `direction`, `format` and `label`, which is

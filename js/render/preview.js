@@ -39,14 +39,15 @@ function bounds(cells) {
     return { minX, maxX, minY, maxY };
 }
 
-function drawPiece(ctx, type, cell, sx, sy, sw, sh, palette, alpha) {
+function drawPiece(ctx, type, cell, sx, sy, sw, sh, palette, alpha, glyphs) {
     const cells = cellsFor(type, 0);   // frozen and shared — never sort in place
     const b = bounds(cells);
     const ox = sx + (sw - (b.maxX - b.minX + 1) * cell) / 2 - b.minX * cell;
     const oy = sy + (sh - (b.maxY - b.minY + 1) * cell) / 2 - b.minY * cell;
     const color = colorFor(palette, ID[type]);
     for (let i = 0; i < cells.length; i++) {
-        drawBlock(ctx, ox + cells[i][0] * cell, oy + cells[i][1] * cell, cell, color, alpha);
+        drawBlock(ctx, ox + cells[i][0] * cell, oy + cells[i][1] * cell, cell, color, alpha,
+            glyphs ? type : undefined);
     }
 }
 
@@ -63,20 +64,20 @@ function drawSocket(ctx, cx, cy, size, palette) {
 
 // Hold: one slot, the whole canvas. Dimmed — not hidden — while holdUsed is
 // set, because the player still needs to read what is in there.
-export function drawHold(ctx, box, type, holdUsed, palette) {
+export function drawHold(ctx, box, type, holdUsed, palette, glyphs) {
     ctx.clearRect(0, 0, box.w, box.h);
     const cell = Math.min(box.w / SLOT_COLS, box.h / SLOT_ROWS);
     if (!type) {
         drawSocket(ctx, box.w / 2, box.h / 2, cell * 1.25, palette);
         return;
     }
-    drawPiece(ctx, type, cell, 0, 0, box.w, box.h, palette, holdUsed ? 0.3 : 1);
+    drawPiece(ctx, type, cell, 0, 0, box.w, box.h, palette, holdUsed ? 0.3 : 1, glyphs);
 }
 
 // Next: `count` slots down the long axis. The first is drawn full size and
 // the rest a shade smaller, so "the one you are getting" is legible at a
 // glance without the queue turning into a size ladder.
-export function drawQueue(ctx, box, types, palette, count) {
+export function drawQueue(ctx, box, types, palette, count, glyphs) {
     ctx.clearRect(0, 0, box.w, box.h);
     const n = Math.max(1, count || 5);
     const vertical = box.h >= box.w;
@@ -91,7 +92,8 @@ export function drawQueue(ctx, box, types, palette, count) {
         const sx = vertical ? 0 : i * slotW;
         const sy = vertical ? i * slotH : 0;
         const scale = i === 0 ? 1 : 0.82;
-        drawPiece(ctx, type, cell * scale, sx, sy, slotW, slotH, palette, i === 0 ? 1 : 0.86);
+        drawPiece(ctx, type, cell * scale, sx, sy, slotW, slotH, palette,
+            i === 0 ? 1 : 0.86, glyphs);
     }
 }
 

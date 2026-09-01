@@ -311,6 +311,33 @@ body {
 }
 #v-score { color: var(--accent); }
 
+/* ── the combo readout ───────────────────────────────────────────────────
+   The one row in the rail that comes and goes: index.html ships it hidden and
+   js/app/ui.js reveals it at a chain of 2. `display: contents` is what keeps
+   the wrapper out of the grid — the dt and dd sit in #readout's own columns as
+   if the <div> were not there — and [hidden]'s `display: none !important`
+   (declared near the top of this file) still takes the pair out together.
+
+   The heat ladder is js/app/ui.js's heatFor(), shared with the banner over the
+   well, so the number in the rail and the flash over the stack always agree
+   about how big the chain is getting. */
+#readout .readout-pair { display: contents; }
+
+#v-combo {
+  color: var(--fg-dim);
+  transition: color 140ms ease-out;
+}
+#v-combo[data-heat="hot"]   { color: #9FD0FF; }
+#v-combo[data-heat="blaze"] { color: var(--accent); }
+#v-combo[data-heat="nova"] {
+  color: var(--accent);
+  animation: combo-nova 900ms ease-in-out var(--arcade-pulse-count, 3);
+}
+@keyframes combo-nova {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
 /* ─── The well ────────────────────────────────────────────────────────────*/
 .well-wrap {
   grid-area: well;
@@ -428,6 +455,42 @@ body {
   animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1), ease-in-out;
   animation-delay: 0s, 260ms;
   animation-iteration-count: 1, var(--arcade-pulse-count, 3);
+}
+
+/* ── the heat ladder ─────────────────────────────────────────────────────
+   Four rungs, set by js/main.js's clearHeat() from whichever of the combo and
+   the quad streak is hotter. They are ADDITIVE on the plain banner rather than
+   replacements for it: each step keeps the entry animation and adds colour,
+   then scale, then a pulse. `record` (the Singularity) stays above all four —
+   it is the rarest thing in the game and must not be reachable by grinding a
+   chain, however long.
+
+   Everything here rides --arcade-pulse-count, which the launcher sets to 0
+   under reduced motion, so a player who asked for stillness gets the colour
+   and none of the movement. */
+#banner[data-kind="warm"]  { color: #BEDCFF; }
+#banner[data-kind="hot"]   { color: #9FD0FF; }
+#banner[data-kind="blaze"] {
+  color: var(--accent);
+  animation-name: banner-in, heat-swell;
+  animation-duration: 260ms, 420ms;
+  animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1), ease-out;
+  animation-delay: 0s, 200ms;
+  animation-iteration-count: 1, 1;
+}
+#banner[data-kind="nova"] {
+  color: var(--accent);
+  text-shadow: 0 0 0.7rem var(--glow), 0 0 1.6rem var(--accent);
+  animation-name: banner-in, record-flash;
+  animation-duration: 260ms, 640ms;
+  animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1), ease-in-out;
+  animation-delay: 0s, 260ms;
+  animation-iteration-count: 1, var(--arcade-pulse-count, 2);
+}
+
+@keyframes heat-swell {
+  from { transform: scale(1.10); }
+  to   { transform: none; }
 }
 
 @keyframes banner-in {
@@ -627,6 +690,29 @@ body {
 }
 .overlay dt { color: var(--fg-dim); }
 .overlay dd { text-align: end; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ── the results card's two extra voices ──────────────────────────────────
+   `res-head` is quieter than a plain .overlay h2 because the Highlights block
+   sits directly under the four numbers it annotates and must not compete with
+   them for the eye; `res-crow` is the opposite — it is the one line on the
+   card that is allowed to be pleased with itself.
+
+   Skill records get the same gold as a personal best but no swell: a run can
+   beat four of them at once, and four lines pulsing in unison reads as an
+   error state rather than as good news. */
+.overlay .res-head {
+  margin-block-start: 0.3rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+}
+.overlay .res-crow {
+  color: var(--accent);
+  font-weight: 600;
+}
+.overlay .res-crow-skill {
+  font-size: 0.85rem;
+  font-weight: 550;
+}
 
 /* Range thumbs, checkboxes and the radios behind the segmented control all
    take their colour from the UA's default accent, which is a blue that comes
@@ -1174,6 +1260,50 @@ body {
 }
 #app[data-screen="menu"] .mode-hero .meta-val { font-size: 1.35rem; }
 
+/* ── the pinned level ─────────────────────────────────────────────────────
+   A sibling of the mode button, never a child: the whole row is one button and
+   a <select> inside a <button> never receives its click. It matches the
+   discard control beside it in height and hairline so the row reads as one
+   object with two small controls hung off it, and the caption is stacked over
+   the number because at phone width there is room for "8" on the line and not
+   for "Level 8". */
+
+#app[data-screen="menu"] .mode-level-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  min-inline-size: max(3.25rem, 44px);
+  min-block-size: max(2.75rem, 44px);
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--menu-hair);
+  border-radius: 0.55rem;
+  cursor: pointer;
+}
+#app[data-screen="menu"] .mode-level-cap {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+#app[data-screen="menu"] .mode-level {
+  inline-size: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  text-align-last: center;
+  cursor: pointer;
+}
+
 /* ── the discard ──────────────────────────────────────────────────────── */
 
 #app[data-screen="menu"] .mode-new {
@@ -1196,11 +1326,21 @@ body {
 
 /* ── the foot ─────────────────────────────────────────────────────────── */
 
+/* The cross-mode bests sit above the lifetime totals in the same small type,
+   one shade brighter: they are an achievement and the totals are a tally. */
+#app[data-screen="menu"] .bests { color: var(--accent); opacity: 0.75; }
+
 #app[data-screen="menu"] .menu-foot {
   display: flex;
   align-items: center;
   gap: 1rem;
   padding-block-start: 0.1rem;
+}
+#app[data-screen="menu"] .menu-tallies {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-inline-size: 0;
 }
 #app[data-screen="menu"] .lifetime {
   min-inline-size: 0;

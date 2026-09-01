@@ -84,6 +84,22 @@ function formatInt(n) {
     return v.toLocaleString('en-US');
 }
 
+/* The shorthand a leaderboard row carries about ITSELF — how the score was
+ * made, not just how big it was. Read off the entry's own meta, which the SDK
+ * merges across devices with the entry, so a row synced from a phone still
+ * knows it was three quads. Silent when the meta is absent: rows written by an
+ * older build have none, and a row that suddenly reads "0q" would be claiming
+ * something about a run nobody recorded. */
+function rowTail(e) {
+    const m = e && e.meta;
+    if (!m || typeof m !== 'object') return '';
+    const bits = [];
+    if (Number(m.quads) > 0) bits.push(Math.floor(m.quads) + 'q');
+    if (Number(m.maxCombo) > 1) bits.push('\u00d7' + Math.floor(m.maxCombo));
+    if (Number(m.perfectClears) > 0) bits.push('\u2605');
+    return bits.length ? '  ' + bits.join(' ') : '';
+}
+
 // ── tiny DOM helpers ─────────────────────────────────────────────────────
 // `text` is always assigned through textContent. There is no variant of these
 // that takes markup, deliberately.
@@ -150,12 +166,20 @@ export function createUI(root, handlers) {
         level: doc.getElementById('v-level'),
         clock: doc.getElementById('v-clock'),
         clockLabel: doc.getElementById('l-clock'),
+        // The combo row is the one readout that is not always there: index.html
+        // ships it hidden and hud() reveals it while a chain is running, so a
+        // player who never chains never gives up a line of the rail to it.
+        combo: doc.getElementById('v-combo'),
+        comboRow: doc.getElementById('r-combo'),
     };
 
     let bannerTimer = 0;
     let disposed = false;
     let capture = null;         // live key-rebind capture, or null
-    const hudCache = { score: null, lines: null, level: null, clock: null, clockLabel: null };
+    const hudCache = {
+        score: null, lines: null, level: null, clock: null, clockLabel: null,
+        combo: null, comboOn: null,
+    };
 
     // ── banner ───────────────────────────────────────────────────────────
 
@@ -206,13 +230,18 @@ export function createUI(root, handlers) {
      * retries for anyone who wants the keyboard. Every other screen is entered
      * by a click or by Escape, neither of which can activate anything, and
      * having the primary action focused there is a kindness. */
-    function paint(node, armed) {
+    function paint(node, armed, focusSel) {
         if (!overlay) return;
         overlay.replaceChildren(node);
         overlay.hidden = false;
-        const first = armed
+        /* An explicit target beats the armed default. It exists for exactly one
+         * case: the menu is repainted BECAUSE the player changed the pinned
+         * level, and throwing focus back to the hero button would take the
+         * keyboard out of the control they are still using. */
+        const wanted = focusSel ? overlay.querySelector(focusSel) : null;
+        const first = wanted || (armed
             ? (overlay.querySelector('button[data-primary]') || overlay.querySelector('button'))
-            : node;
+            : node);
         if (!first) return;
         if (first === node) {
             node.tabIndex = -1;
@@ -281,10 +310,17 @@ export function createUI(root, handlers) {
             ],
         });
 
+        /* The two tally lines are stacked in their own column so the foot
+         * stays a two-item row — text on the left, Settings on the right.
+         * Side by side they would each be ellipsised to nothing on a phone,
+         * and `.menu-link`'s auto margin already assumes one thing to its
+         * left. Omitted entirely when neither line has anything to say, so a
+         * fresh install still gets the bare Settings foot it had before. */
+        const tallies = [skillLine(d.skills), lifetimeLine(st)].filter(Boolean);
         const foot = mk('footer', {
             className: 'menu-foot',
             children: [
-                lifetimeLine(st),
+                tallies.length ? mk('div', { className: 'menu-tallies', children: tallies }) : null,
                 button('Settings', () => call('openSettings'), { className: 'menu-link' }),
             ],
         });
@@ -347,6 +383,7 @@ export function createUI(root, handlers) {
             ].filter(Boolean).join(' — '));
 
             const kids = [b];
+            if (m.pinnable) kids.push(levelPicker(m, name));
             if (m.resumable) {
                 kids.push(button('New', () => call('fresh', m.id), {
                     className: 'mode-new',
@@ -354,6 +391,59 @@ export function createUI(root, handlers) {
                 }));
             }
             return mk('div', { className: 'mode-row', children: kids });
+        }
+
+        /* The pinned level, chosen where the mode is launched.
+         *
+         * A SIBLING OF THE MODE BUTTON, never a child of it. The whole row is
+         * one button by design, and a <select> nested inside a <button> is both
+         * invalid and unoperable — the click never reaches the listbox. So it
+         * sits beside it, the way the destructive "New" control already does,
+         * and for the same reason: it is a second decision, not part of the
+         * first.
+         *
+         * It is also the ONLY control on this screen that changes what the row
+         * above it says — the "Best" caption is that level's record, not the
+         * mode's — which is why changing it repaints the menu rather than
+         * updating in place, and why `focus` exists on the menu payload. */
+        function levelPicker(m, name) {
+            const max = Math.max(1, Math.floor(Number(d.maxPinLevel) || 19));
+            const current = Math.min(max, Math.max(1, Math.floor(Number(m.pinLevel) || 1)));
+            const sel = mk('select', { className: 'mode-level' });
+            // Scoped to the mode rather than a bare 'pin-level': the table
+            // holds one pinnable mode today, and a second one would otherwise
+            // put two identical ids in the same document.
+            sel.id = 'pin-level-' + String(m.id || 'x');
+            sel.setAttribute('aria-label', name + ' level');
+            for (let i = 1; i <= max; i++) {
+                const opt = mk('option', { text: String(i) });
+                opt.value = String(i);
+                if (i === current) opt.selected = true;
+                sel.append(opt);
+            }
+            sel.addEventListener('change', () => {
+                call('changeSetting', 'pinLevel', Number(sel.value));
+            });
+            /* A <div>, NOT a <label> wrapping the select. A label that contains
+             * its own control has an accessible name built from everything
+             * inside it — which here is the word "Level" followed by all
+             * nineteen option labels run together. The aria-label above wins
+             * today and hides that, so the only symptom would be the day
+             * somebody removes it; a plain wrapper makes it unrepresentable.
+             *
+             * The caption is outside the <select> so the closed control shows
+             * the number alone: on a phone row there is width for "8", not for
+             * "Level 8", and the accessible name carries the rest. */
+            return mk('div', {
+                className: 'mode-level-wrap',
+                children: [
+                    mk('span', {
+                        className: 'mode-level-cap', text: 'Level',
+                        attrs: { 'aria-hidden': 'true' },
+                    }),
+                    sel,
+                ],
+            });
         }
 
         /* The mode's own piece, in the mode's own hue — the stylesheet owns
@@ -385,14 +475,46 @@ export function createUI(root, handlers) {
             }
             const name = String(m.name || '').trim().toLowerCase();
             if (!name) return null;
+            /* A pinnable mode keeps a record PER LEVEL, so the loose prefix
+             * match below would hand back whichever level happened to be
+             * stored first — "Best 40,000" next to a level picker reading 8,
+             * for a run played at level 2. Ask for this level's label exactly,
+             * and show nothing rather than something from another level. */
+            const exact = m.pinnable
+                ? (name + ' \u2014 level ' + Math.max(1, Math.floor(Number(m.pinLevel) || 1)))
+                : null;
             for (const r of records) {
                 if (!r || !r.text) continue;
                 const label = String(r.label || '').trim().toLowerCase();
-                if (label === name || label.startsWith(name + ' ')) {
+                if (exact ? label === exact : (label === name || label.startsWith(name + ' '))) {
                     return { cap: 'Best', val: String(r.text) };
                 }
             }
             return null;
+        }
+
+        /* The four cross-mode bests, on one line, or nothing at all until at
+         * least one of them is set.
+         *
+         * In the FOOT rather than on a mode row, because that is what they are:
+         * a combo built in Ultra and a combo built in Sprint are the same
+         * record, so hanging them off any one mode would be a lie about where
+         * they came from. Abbreviated hard — "Combo ×11 · B2B ×14" — because
+         * this line sits under five mode rows and is the smallest type on the
+         * screen; the full names live in the launcher's Records sheet, and on
+         * the results card that crows about beating one. */
+        function skillLine(list) {
+            const rows = Array.isArray(list) ? list.filter(Boolean) : [];
+            if (!rows.length) return null;
+            const short = {
+                'best-combo': 'Combo \u00d7',
+                'best-b2b': 'B2B \u00d7',
+                'best-quad-streak': 'Quads \u00d7',
+                'best-lock': 'Clear ',
+            };
+            const parts = rows.map((r) =>
+                (short[r.category] || (r.label + ' ')) + formatInt(r.value));
+            return mk('p', { className: 'lifetime bests', text: parts.join(' \u00b7 ') });
         }
 
         /* One line of lifetime totals, or nothing at all on a fresh install.
@@ -438,10 +560,33 @@ export function createUI(root, handlers) {
             defList(statPairs(d)),
         ];
 
+        /* WHAT THE RUN WAS INTERESTING FOR, which the four numbers above do
+         * not say. Two 40 000-point runs are the same row on a board; one of
+         * them got there on a seven-quad chain. Only the tallies that actually
+         * happened are listed — a run with no T-spin in it should not have a
+         * line reading "T-spins 0", which reads as a scolding. */
+        const highs = Array.isArray(d.highlights) ? d.highlights.filter(Boolean) : [];
+        if (highs.length) {
+            kids.push(mk('h2', { className: 'res-head', text: 'Highlights' }));
+            kids.push(defList(highs.map((h) => [h.label, h.text])));
+        }
+
         if (d.record) {
             kids.push(mk('p', {
+                className: 'res-crow',
                 text: 'New personal best.',
-                style: 'color:var(--accent); font-weight:600;',
+            }));
+        }
+
+        /* Every skill record this run beat, named one per line. They are
+         * separate from the personal best above because they are a different
+         * claim: that was the best score you have posted in this mode, these
+         * are the best you have ever PLAYED, in any mode that can end. */
+        for (const b of (Array.isArray(d.beaten) ? d.beaten : [])) {
+            if (!b || !b.crow) continue;
+            kids.push(mk('p', {
+                className: 'res-crow res-crow-skill',
+                text: b.crow + ' \u2014 ' + formatInt(b.value),
             }));
         }
 
@@ -452,11 +597,17 @@ export function createUI(root, handlers) {
             // sync). textContent, never innerHTML — §7b.
             kids.push(defList(scores.map((e, i) => [
                 (i + 1) + '. ' + String((e && e.name) || 'Anonymous'),
-                d.scoreFormat === 'duration-ms' ? formatClock(e && e.score) : formatInt(e && e.score),
+                (d.scoreFormat === 'duration-ms' ? formatClock(e && e.score) : formatInt(e && e.score))
+                    + rowTail(e),
             ])));
         }
 
         kids.push(button('Play again', () => call('restart'), { primary: true }));
+        // Settings is reachable from EVERY settled screen, this one included.
+        // A run that just ended on a control that felt wrong is the moment a
+        // player most wants the knobs, and sending them back to the menu to
+        // find them is the one time the trip is a real cost.
+        kids.push(button('Settings', () => call('openSettings')));
         kids.push(button('Back to menu', () => call('quit')));
         return card(kids);
     }
@@ -496,6 +647,12 @@ export function createUI(root, handlers) {
             (v) => (v >= 41 ? 'instant' : v + '×'),
             (v) => (v >= 41 ? 1200 : v)));
         kids.push(toggle('Ghost piece', 'ghost', s.ghost !== false));
+        kids.push(toggle('Piece glyphs', 'glyphs', !!s.glyphs));
+        kids.push(mk('p', {
+            className: 'set-note',
+            text: 'Engraves each piece with its own letter, so colour is never'
+                + ' the only thing telling them apart.',
+        }));
 
         const lock = mk('select', { style: 'flex:0 0 auto; padding:0.35rem;' });
         for (const [value, text] of [
@@ -628,9 +785,12 @@ export function createUI(root, handlers) {
             const input = mk('input', { className: 'set-range' });
             input.type = 'range';
             input.min = '40';
-            input.max = '250';
+            // 300, not 250: js/main.js clamps the stored value to 0.4–3, so a
+            // slider stopping at 2.5 could not represent a setting the game
+            // will happily keep — and dragging it silently lowered one.
+            input.max = '300';
             input.step = '10';
-            input.value = String(Math.round(Math.min(2.5, Math.max(0.4, current)) * 100));
+            input.value = String(Math.round(Math.min(3, Math.max(0.4, current)) * 100));
             input.setAttribute('aria-label', 'Flick to drop');
 
             const say = () => {
@@ -750,7 +910,7 @@ export function createUI(root, handlers) {
             if (active && active !== doc.body && typeof active.blur === 'function') active.blur();
             return;
         }
-        if (screen === 'menu') paint(menuScreen(data), true);
+        if (screen === 'menu') paint(menuScreen(data), true, data && data.focus);
         else if (screen === 'paused') paint(pausedScreen(data), true);
         else if (screen === 'over') paint(overScreen(data), false);
         else if (screen === 'settings') paint(settingsScreen(data), true);
@@ -783,6 +943,38 @@ export function createUI(root, handlers) {
         if (clockLabel !== hudCache.clockLabel && readout.clockLabel) {
             hudCache.clockLabel = clockLabel; readout.clockLabel.textContent = clockLabel;
         }
+
+        /* The combo, while there is one. A chain of 1 is not a chain — it is
+         * the first clear of one, and every clear is that — so the row appears
+         * at 2 and leaves the moment the chain breaks. `data-heat` is the same
+         * ladder the banner climbs, so the number in the rail and the flash
+         * over the well agree about how big this is getting without either of
+         * them owning the rule. */
+        const n = Math.max(0, Math.floor(Number(d.combo) || 0));
+        const on = n >= 2;
+        if (on !== hudCache.comboOn && readout.comboRow) {
+            hudCache.comboOn = on;
+            readout.comboRow.hidden = !on;
+        }
+        if (on) {
+            const combo = '\u00d7' + formatInt(n);
+            if (combo !== hudCache.combo && readout.combo) {
+                hudCache.combo = combo;
+                readout.combo.textContent = combo;
+                readout.combo.dataset.heat = heatFor(n);
+            }
+        }
+    }
+
+    /* The shared escalation ladder — one rule, read by the combo readout, the
+     * banner and (through js/main.js) the FX layer, so a ×7 combo looks like a
+     * ×7 combo everywhere it is shown. Exported on the returned object because
+     * js/main.js needs the same answer for the banner it raises. */
+    function heatFor(n) {
+        if (n >= 10) return 'nova';
+        if (n >= 7) return 'blaze';
+        if (n >= 4) return 'hot';
+        return 'warm';
     }
 
     function setDanger(on) {
@@ -802,5 +994,5 @@ export function createUI(root, handlers) {
         if (banner) { banner.textContent = ''; delete banner.dataset.kind; }
     }
 
-    return { show, banner: setBanner, setDanger, hud, dispose };
+    return { show, banner: setBanner, setDanger, hud, heatFor, dispose };
 }

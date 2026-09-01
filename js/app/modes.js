@@ -43,41 +43,69 @@ const DAILY_GARBAGE_ROWS = 8;
  *     comes from.
  */
 export const MODES = deepFreeze({
-    marathon: {
-        id: 'marathon',
-        name: 'Marathon',
+    /* THE STANDARD ESCALATING GAME, renamed from Marathon (§3, amended
+     * 2026-08-31). The rules did not move an inch — no line goal, levels every
+     * ten lines forever, the curve riding down to true 20G at 19 and pinned
+     * there. Only the name did, because "Marathon" was needed for the mode that
+     * actually lets you run a marathon.
+     *
+     * NEW FLEET CATEGORIES rather than inherited ones. The legacy `marathon` /
+     * `marathon-score` categories hold scores set under the old name, and the
+     * SDK has no rename; re-using them would mix escalating runs into the
+     * pinned board forever. Old records stay visible in the launcher's Records
+     * sheet under the label they were written with, and nothing is destroyed. */
+    arcade: {
+        id: 'arcade',
+        name: 'Arcade',
         blurb: 'The standard game. The levels keep climbing. Play until the well wins.',
-        /* NO LINE GOAL, and that is the mode (§3, amended 2026-08-22).
-         *
-         * Marathon shipped stopping at 150 lines / level 15, with an "Endless"
-         * toggle deferred out of v1 because nothing could read it. The
-         * resolution is not to revive the toggle: Marathon simply has no
-         * finish line, so there is no setting to read and no second mode to
-         * name. The run ends on a top-out, like the standard game it is
-         * supposed to be.
-         *
-         * Nothing else in this entry moves. `metric: 'score'` still files
-         * every finished run, because js/app/store.js only gates on `won` for
-         * a TIME metric — a Marathon that ended on a top-out has always been a
-         * score worth filing, which is exactly why removing the goal costs the
-         * leaderboard nothing.
-         *
-         * js/core/gravity.js carries the other half: levelFor() keeps
-         * advancing every ten lines forever and the curve rides down to the
-         * true 20G floor at level 19 and STAYS there. */
         goalLines: null,
         timeLimitMs: null,
         goal: null,
         garbageRows: 0,
+        pinnable: false,
         seedSource: 'entropy',
         metric: 'score',
         instantRetry: false,
-        scores: { category: 'marathon', order: 'desc', keyed: false },
+        scores: { category: 'arcade', order: 'desc', keyed: false },
         record: {
-            category: 'marathon-score',
+            category: 'arcade-score',
             direction: 'higher',
             format: 'integer',
-            label: 'Marathon score',
+            label: 'Arcade score',
+        },
+    },
+    /* MARATHON — the level you pick, held for as long as you can hold it.
+     *
+     * The escalating game answers "how fast can you still think"; this one
+     * answers "how long can you keep it up", which is a different question and
+     * needs a level that stops moving. `pinnable` says the player chooses it;
+     * js/core/game.js's pinLevel does the rest, and gravity.js is never asked
+     * for a second opinion because levelFor() is simply not consulted.
+     *
+     * THE BOARD IS KEYED BY LEVEL, exactly as the Daily Well's is keyed by
+     * date, and for the same reason: a table mixing level-2 runs with level-15
+     * ones is not a leaderboard, it is a pile. The personal record is per level
+     * too — a category is only created the first time a level is played, so a
+     * player who lives at level 8 carries one record, not nineteen. */
+    marathon: {
+        id: 'marathon',
+        name: 'Marathon',
+        blurb: 'Pin the level. No curve, no finish line — just how long you can hold it.',
+        goalLines: null,
+        timeLimitMs: null,
+        goal: null,
+        garbageRows: 0,
+        pinnable: true,
+        seedSource: 'entropy',
+        metric: 'score',
+        instantRetry: false,
+        scores: { category: 'marathon', order: 'desc', keyed: 'level' },
+        record: {
+            category: 'marathon',
+            perLevel: true,
+            direction: 'higher',
+            format: 'integer',
+            label: 'Marathon',
         },
     },
     sprint: {
@@ -88,6 +116,7 @@ export const MODES = deepFreeze({
         timeLimitMs: null,
         goal: null,
         garbageRows: 0,
+        pinnable: false,
         seedSource: 'entropy',
         metric: 'time',
         instantRetry: true,
@@ -110,6 +139,7 @@ export const MODES = deepFreeze({
         timeLimitMs: ULTRA_MS,
         goal: null,
         garbageRows: 0,
+        pinnable: false,
         seedSource: 'entropy',
         metric: 'score',
         instantRetry: true,
@@ -129,7 +159,16 @@ export const MODES = deepFreeze({
         timeLimitMs: null,
         goal: null,
         garbageRows: 0,
+        pinnable: false,
         seedSource: 'entropy',
+        /* NO SKILL RECORDS EITHER, and this is the one place the flag is set.
+         * Best combo, longest B2B, most quads and biggest lock are records
+         * because they were built under threat — and Zen has no top-out, so a
+         * combo there can be assembled at leisure over an hour with the stack
+         * at the ceiling. Filing those alongside a combo built in a real run
+         * would retire all four categories permanently on the first Zen
+         * session. Lifetime counters still roll up: playing is still playing. */
+        skillRecords: false,
         // Nothing to rank and nothing to beat: §3 gives Zen lifetime stats
         // only, which store.js rolls up for every mode anyway.
         metric: null,
@@ -150,19 +189,28 @@ export const MODES = deepFreeze({
          * already in the first drain. Nothing else in this table carries it. */
         goal: 'garbage',
         garbageRows: DAILY_GARBAGE_ROWS,
+        pinnable: false,
         seedSource: 'daily',
         metric: 'time',
         instantRetry: false,
         // Everyone digs the same well, so the day IS the board: one category,
         // one entry key per date, ascending because the fast time wins.
-        scores: { category: 'daily', order: 'asc', keyed: true },
+        scores: { category: 'daily', order: 'asc', keyed: 'date' },
         record: null,
     },
 });
 
-// Menu order, and the id a stored-but-unknown mode falls back to.
+// Menu order, and the id a stored-but-unknown mode falls back to. Arcade is
+// first and is the default: it is the game somebody who has never played this
+// before should land in, and Marathon asks a question (which level?) that only
+// means something once you know how fast level 8 is.
 export const MODE_IDS = Object.freeze(Object.keys(MODES));
-export const DEFAULT_MODE = 'marathon';
+export const DEFAULT_MODE = 'arcade';
+
+// The level a pinnable mode starts offering. Slow enough to hold indefinitely
+// with room to think, fast enough not to feel like a demo — and the player
+// moves it on the menu card, where the number is next to the button.
+export const DEFAULT_PIN_LEVEL = 5;
 
 /**
  * The opts object js/core/game.js's createGame() takes, for one mode.
@@ -186,13 +234,22 @@ export const DEFAULT_MODE = 'marathon';
  * @param {number|string|function|{getState:function}} seed
  *                              the run's seed, a factory for one, or the
  *                              generator Arcade.daily.seed() returns.
+ * @param {{pinLevel?: number}} [opts]
+ *                              the player's pinned level, honoured ONLY by a
+ *                              mode that declares `pinnable`. Passing it to a
+ *                              mode that does not is ignored rather than
+ *                              rejected: the menu holds one stored level and
+ *                              hands it over on every launch, and a Sprint
+ *                              that threw for being handed it would be a bug
+ *                              in this file, not at the call site.
  * @returns {{mode:string, seed:number|string, goalLines:?number,
- *            timeLimitMs:?number, goal:?string, garbageRows:number}} a fresh
- *            object every
+ *            timeLimitMs:?number, goal:?string, garbageRows:number,
+ *            pinLevel:?number}} a fresh object every
  *            call — the caller owns it and may mutate it.
  */
-export function gameOptsFor(modeId, seed) {
+export function gameOptsFor(modeId, seed, opts) {
     const m = modeFor(modeId);
+    const o = opts || {};
     return {
         mode: m.id,
         seed: resolveSeed(seed),
@@ -200,7 +257,19 @@ export function gameOptsFor(modeId, seed) {
         timeLimitMs: m.timeLimitMs,
         goal: m.goal,
         garbageRows: m.garbageRows,
+        // core clamps to 1..MAX_PIN_LEVEL; null is the escalating curve.
+        pinLevel: m.pinnable ? pinLevelOf(o.pinLevel) : null,
     };
+}
+
+/* The player's pinned level, defaulted rather than rejected. An unusable value
+ * — a missing setting, a hand-edited blob, a string — becomes the default
+ * rather than null, because null on a pinnable mode does not mean "no
+ * preference", it means the level climbs, and silently turning Marathon back
+ * into Arcade is the one outcome nobody asked for. */
+export function pinLevelOf(v) {
+    const n = Math.floor(Number(v));
+    return Number.isFinite(n) && n >= 1 ? n : DEFAULT_PIN_LEVEL;
 }
 
 /* A seed, however the caller happens to be holding it.

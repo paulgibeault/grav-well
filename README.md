@@ -38,7 +38,8 @@ stops being a quarry and rings like a pipe.
 
 | Mode | What it is |
 | ---- | ---------- |
-| **Marathon** | The default, and the standard endless game. No finish line: levels advance every 10 lines for as long as you last, gravity following the guideline curve down to true 20G at level 19 and pinned there. You play until you top out. |
+| **Arcade** | The default, and the standard endless game. No finish line: levels advance every 10 lines for as long as you last, gravity following the guideline curve down to true 20G at level 19 and pinned there. You play until you top out. |
+| **Marathon** | Pick a level on the menu row and the run holds it — the curve never arrives, so the well stays playable for as long as you can keep it clear. Scoring takes the pinned level too, so a level-9 pin scores like level 9 from the first line. Each level keeps its own board and its own personal best. |
 | **Sprint 40** | Clear 40 lines as fast as you can. Instant retry. |
 | **Ultra** | Three minutes on the clock. Maximum score. |
 | **Zen** | Level-1 gravity forever, no top-out, no timer. An overflowing well gently sinks rather than ending your run. |
@@ -66,6 +67,9 @@ CW · **Z** or Ctrl rotate CCW · **C** or Shift hold · **P**/Esc pause ·
 **R** retry. Remappable, and keyed on physical position so AZERTY and Dvorak
 work unchanged.
 
+Settings are reachable from every settled screen — the menu, the pause card
+and the results card — and closing them puts you back where you were.
+
 An on-screen **button cluster** is available in settings as an accessibility
 scheme, with handedness mirroring. Two gesture settings are yours rather than
 ours, because both are questions about a thumb: **Flick sensitivity**, if the
@@ -87,9 +91,18 @@ keyboard is unaffected — ↑/X and Z/Ctrl stay CW and CCW, and stay remappable
   gestures (stone, rubble, breakage, a pawl, a drone) sharing one cistern
   room, voiced by *distance* rather than volume, over a bed that deepens as
   the stack rises
+- **Escalating celebration** — a combo climbs a pitch ladder and counts itself
+  out on a pawl; successive quads answer from further down the shaft each
+  time, and a third in a row brings a beam up the well and a second blast
+  behind it. The banner, the rail and the well all read the same heat ladder
 - Personal bests and leaderboards via the
   [Paul's Arcade SDK](https://paulgibeault.github.io/) — per-mode records,
   a shared daily board, and lifetime stats
+- **Skill records** that say what a run was interesting *for*, not just how
+  big it was: best combo, longest back-to-back, longest quad streak, biggest
+  single clear — kept across every mode that can top out
+- **Piece glyphs** — an accessibility mode that engraves each piece with its
+  own letter, so colour is never the only thing telling them apart
 - Honors every launcher setting: theme, font scale, reduced motion,
   handedness, power saver, and volume
 - Installable PWA, plays offline, and works standalone or inside the launcher

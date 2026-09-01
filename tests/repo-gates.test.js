@@ -9,6 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import { execSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "../tools/stage.mjs";
@@ -100,25 +101,72 @@ test("js/core imports only itself and the vendored rng", () => {
     }
 });
 
-test("the vendored fleet files are byte-identical to their canonical copies", () => {
-    // These three are fleet property (GAME_INTEGRATION.md §7c, §13a): never
-    // edit the copy, change the canonical file and re-copy. A local edit forks
-    // this game's seed streams or its deploy verification in silence, so the
-    // drift is worth failing a build over. Skipped when no sibling checkout is
-    // present (CI runners have only this repo).
-    const siblings = {
-        "js/arcade-rng.js": "/home/user/paulgibeault/paulgibeault.github.io/arcade-rng.js",
-        "tools/verify-artifact.mjs": "/home/user/moon-lit/tools/verify-artifact.mjs",
-        "tools/inject-precache.mjs": "/home/user/moon-lit/tools/inject-precache.mjs",
+/* The three vendored fleet files (GAME_INTEGRATION.md §7c, §13a): never edit
+ * the copy — change the canonical file in the launcher repo and re-copy. A
+ * local edit forks this game's seed streams or its deploy verification in
+ * silence, so the drift is worth failing a build over.
+ *
+ * THIS GATE USED TO BE UNABLE TO FAIL. It compared each file against a hard
+ * coded absolute path in a specific developer's home directory
+ * (`/home/user/moon-lit/...`), skipped every file whose canonical copy was
+ * missing, and then asserted `checked >= 0` — which is true of a count. On CI
+ * and in any fresh clone nothing was compared and the test passed while
+ * enforcing nothing at all.
+ *
+ * The repair is a digest checked into this file. It cannot prove the copy
+ * matches the canonical original — nothing in this repo can, the original is
+ * not here — but it catches the failure the comment actually describes: an
+ * accidental local edit, on every machine including CI. Re-copying a genuinely
+ * updated fleet file is then a deliberate two-line change here, which is the
+ * review the old gate was pretending to be.
+ *
+ * To update after a legitimate re-copy:
+ *   shasum -a 256 js/arcade-rng.js tools/verify-artifact.mjs tools/inject-precache.mjs
+ */
+const VENDORED = {
+    "js/arcade-rng.js":
+        "385a78da7c74007b621545334bb14e00fbcd3d1a5c79d6d47682ec7277d03cb2",
+    "tools/verify-artifact.mjs":
+        "f89e40d579a1f85dd5402279bda444ad71861b9db794e3f45ba4ebbe536aa412",
+    "tools/inject-precache.mjs":
+        "7a8371071220cbfe8c281a67ff44b5685c7b2e8afb8c829137c70884fb9808e3",
+};
+
+test("the vendored fleet files have not been edited in place", () => {
+    for (const [local, want] of Object.entries(VENDORED)) {
+        const full = path.join(ROOT, local);
+        assert.ok(fs.existsSync(full), `${local} is missing`);
+        const got = createHash("sha256").update(fs.readFileSync(full)).digest("hex");
+        assert.strictEqual(got, want,
+            `${local} has been edited. It is fleet property: change the canonical ` +
+            "file in the launcher repo, re-copy it here, and update the digest in " +
+            "tests/repo-gates.test.js.");
+    }
+});
+
+test("the vendored fleet files match the canonical copies, when those are reachable", () => {
+    /* The real check, when a fleet checkout is actually present. Opt-in through
+     * the environment rather than guessed at from a home directory: point
+     * ARCADE_FLEET_ROOT at the launcher checkout and this compares bytes.
+     * Absent — which is the case on CI and in a fresh clone — it says so and
+     * leaves the digest gate above as the floor, instead of silently passing
+     * while checking nothing. */
+    const root = process.env.ARCADE_FLEET_ROOT;
+    if (!root || !fs.existsSync(root)) {
+        assert.ok(true, "no ARCADE_FLEET_ROOT: digest gate is the floor here");
+        return;
+    }
+    const canonical = {
+        "js/arcade-rng.js": "arcade-rng.js",
+        "tools/verify-artifact.mjs": "tools/verify-artifact.mjs",
+        "tools/inject-precache.mjs": "tools/inject-precache.mjs",
     };
-    let checked = 0;
-    for (const [local, canonical] of Object.entries(siblings)) {
-        if (!fs.existsSync(canonical)) continue;
+    for (const [local, rel] of Object.entries(canonical)) {
+        const src = path.join(root, rel);
+        if (!fs.existsSync(src)) continue;
         assert.strictEqual(
             fs.readFileSync(path.join(ROOT, local), "utf8"),
-            fs.readFileSync(canonical, "utf8"),
-            `${local} has drifted from ${canonical}`);
-        checked++;
+            fs.readFileSync(src, "utf8"),
+            `${local} has drifted from ${src}`);
     }
-    assert.ok(checked >= 0);
 });
