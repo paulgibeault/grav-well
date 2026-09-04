@@ -685,7 +685,14 @@ async function boot() {
         persistSettings();
 
         if (CORE_KEYS.has(key)) applyCoreSettings();
-        if (key === 'scheme') touch.setOpts({ scheme: settings.scheme });
+        /* The scheme changes the LAYOUT, not just the input path: the button
+         * cluster is glass over the playfield and the well steps back from it
+         * (css/well.css, "The button cluster rides OVER the well"), so
+         * switching schemes moves the well's box without a resize event ever
+         * firing. Re-measure and re-push the cell size, exactly as the
+         * font-scale path does — otherwise the canvas keeps its old size and
+         * hangs over the pads until the next real resize. */
+        if (key === 'scheme') { touch.setOpts({ scheme: settings.scheme }); onResize(); }
         if (key === 'flick') touch.setOpts({ flick: settings.flick });
         if (key === 'tapRotate') touch.setOpts({ tapRotate: settings.tapRotate });
         if (key === 'bed') audio.setOpts({ bedEnabled: settings.bed });

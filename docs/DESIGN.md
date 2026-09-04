@@ -396,6 +396,30 @@ can't do precision gestures, and a fallback if a gesture scheme fights a
 particular browser. Anchored per `Arcade.settings.handedness()`
 (`data-handedness` mirrors it).
 
+The cluster is **glass over the playfield, not a dock under it** — changed
+2026-09-03 after a playtest on a small iPhone: "when using the on screen
+buttons on a smaller iphone, this becomes rather unusable." It shipped in the
+column flow, taking real space so it could never cover the well, and measured
+on a 375x667 phone that cost 112px out of a 591px column. The well came out
+176x352 — a 17.6px cell, four fifths of what the gesture scheme gets on the
+same handset — so the players who most need this scheme were the ones playing
+the smallest board. Overlaid it is 27.2px, and the trade holds because:
+
+- The layer is mostly hole. `#touch` and `.touch-cluster` take no pointer
+  events; only the buttons do, so the well is untouched everywhere a button
+  isn't.
+- A button is a ring and a glyph over a wash, not a plate — the stack reads
+  through it. The opacity budget goes on the PRESS instead, which floods the
+  button; that is the moment feedback is worth anything.
+- The well still steps back by `--touch-reserve` (~40% of the pad band) so the
+  rows actually being placed into stay above the glass. That variable, the
+  button size and the gap are the whole ergonomic trade and they live together
+  at the top of `css/well.css` to be retuned against a real thumb.
+
+Size floor is unchanged and non-negotiable: never below 44 CSS px, larger when
+the player has scaled type up (`--touch-btn` is a rem clamp), and 44px flat on
+a landscape phone where there is no height to spend.
+
 **Gamepad:** M4 (the launcher's iframe `allow` already includes `gamepad`).
 
 ### Layout — phone and laptop are both first-class
@@ -404,7 +428,22 @@ Not "responsive" as an afterthought; an acceptance criterion:
 
 - **Phone portrait** — the well is the hero and stays fully visible with no
   page scroll; hold/next/readout reflow from side rails into a compact strip.
+  The strip **never wraps**: it shipped with `flex-wrap: wrap`, and at 375px
+  the readout dropped to a second line and the strip went from ~50px to 178px
+  — 27% of the screen on four numbers, all of it off the well. It is now one
+  row of bare canvases and a readout laid out as columns of label-over-value
+  pairs, folded two pairs to a column, so a seven-figure score and a live
+  combo still fit at 320px. The combo adds a COLUMN, never a row, so the
+  strip's height cannot change mid-chain. Below 8px a preview stops being a
+  piece, so the next queue shows **as many previews as fit at a legible size**
+  rather than always five — three in the phone strip, five in the side rail.
 - **Phone landscape** — the short-viewport case a naive height rule breaks.
+  Short-and-wide takes the SIDE-RAIL layout, not the strip: the 46em
+  breakpoint assumed every landscape phone was that wide and a 667x375 SE is
+  not, so it kept the strip and came out at an 11px cell. The second clause is
+  `(min-width: 30em) and (max-height: 30em)` — wide enough to seat two rails,
+  short enough that a strip is the wrong way to spend the space, and
+  unsatisfiable in portrait.
 - **Laptop/desktop** — the three-column layout with side rails.
 - `100dvh` (with a `100vh` fallback), because `vh` overshoots on mobile Safari
   where the URL bar moves; `env(safe-area-inset-*)` so nothing lands under a

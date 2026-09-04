@@ -27,6 +27,32 @@ import { drawBlock, colorFor, withAlpha } from './layers.js';
 const SLOT_COLS = 4.55;
 const SLOT_ROWS = 2.5;
 
+/* How many previews the box can show without shrinking them past reading.
+ *
+ * drawQueue divides its box into `count` equal slots along the long axis and
+ * fits every piece to the SMALLEST cell any slot can take, so the count and
+ * the legibility are one number, not two. In the side rail that number is
+ * free — a tall column has room for five. In the phone strip the queue is a
+ * band a hundred-odd pixels wide, and five slots in it are twenty pixels each:
+ * a coloured shape, not a piece you can name. Three you can read beat five you
+ * cannot, so the count comes from the box rather than from a constant.
+ *
+ * Inverts drawQueue's own geometry: cell = min(cross-axis fit, along-axis fit
+ * / count), and only the along-axis term depends on the count, so the largest
+ * count that still clears `minCell` is floor(along / (perSlot * minCell)).
+ * Never returns 0 — one preview is the floor, however small the box.
+ */
+export function queueCapacity(box, max, minCell) {
+    const n = Math.max(1, max || 5);
+    const floorCell = Math.max(1, minCell || 1);
+    if (!box || !(box.w > 1) || !(box.h > 1)) return n;
+    const vertical = box.h >= box.w;
+    const along = vertical ? box.h : box.w;
+    const perSlot = vertical ? SLOT_ROWS : SLOT_COLS;
+    const fit = Math.floor(along / (perSlot * floorCell));
+    return Math.max(1, Math.min(n, fit));
+}
+
 function bounds(cells) {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < cells.length; i++) {
