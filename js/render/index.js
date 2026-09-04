@@ -32,7 +32,7 @@ import {
     buildBackground, buildStars, buildLocked, drawBlock, drawGhostBlock,
 } from './layers.js';
 import { createFx } from './fx.js';
-import { drawHold, drawQueue, previewSignature } from './preview.js';
+import { drawHold, drawQueue, previewSignature, queueCapacity } from './preview.js';
 
 // Beyond 3× the extra pixels are past what anyone can resolve and cost 78%
 // more fill than 2×. Phones that report 4 exist; honouring them literally is
@@ -46,6 +46,10 @@ const MAX_DPR = 3;
 const DRIFT_CELLS_PER_SEC = 0.09;
 
 const QUEUE_LEN = 5;
+/* The smallest cell a preview is worth drawing at, in CSS px. Below this the
+ * queue stops being pieces and becomes confetti, so the strip shows fewer of
+ * them instead — see queueCapacity() in preview.js. */
+const MIN_PREVIEW_CELL = 8;
 
 function now() {
     return (typeof performance !== 'undefined' && performance.now)
@@ -300,15 +304,20 @@ export function createRenderer(canvases, opts) {
 
     function drawPiecePreviewLayers(g) {
         if (!holdCtx && !nextCtx) return;
-        const key = previewSignature(g.hold, g.holdUsed, g.queue, QUEUE_LEN)
-            + '|' + palette.theme + '|' + (cfg.glyphs ? 'g' : '-');
+        // The count is part of the signature: a rotate from the phone strip
+        // into the side rail changes how many previews are shown without
+        // changing which pieces are queued, and a signature that missed it
+        // would leave the old count on screen until the next lock.
+        const shown = queueCapacity(nextBox, QUEUE_LEN, MIN_PREVIEW_CELL);
+        const key = previewSignature(g.hold, g.holdUsed, g.queue, shown)
+            + '|' + shown + '|' + palette.theme + '|' + (cfg.glyphs ? 'g' : '-');
         if (key === previewKey) return;
         previewKey = key;
         if (holdCtx && holdBox.w > 1) {
             drawHold(holdCtx, holdBox, g.hold, !!g.holdUsed, palette, cfg.glyphs);
         }
         if (nextCtx && nextBox.w > 1) {
-            drawQueue(nextCtx, nextBox, g.queue, palette, QUEUE_LEN, cfg.glyphs);
+            drawQueue(nextCtx, nextBox, g.queue, palette, shown, cfg.glyphs);
         }
     }
 

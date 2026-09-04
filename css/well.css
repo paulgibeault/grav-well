@@ -34,6 +34,15 @@
   --font-scale: 1;
   color-scheme: dark;
 
+  /* Control geometry, in one place because these three numbers are the whole
+     ergonomic trade and they get retuned against a real thumb, not a mockup.
+     --touch-band is the tall pad (two rows); --touch-reserve is how much of it
+     the well steps aside for instead of sliding underneath. */
+  --touch-btn: clamp(3.25rem, 16vw, 4.5rem);
+  --touch-gap: 0.45rem;
+  --touch-band: calc(var(--touch-btn) * 2 + var(--touch-gap));
+  --touch-reserve: calc(var(--touch-band) * 0.42);
+
   /* Chrome */
   --bg-page:   #05070E;
   --bg-shaft:  #0D1425;   /* the mouth of the shaft, lit from above */
@@ -84,6 +93,17 @@
   --p-z: #FF6B6B;
   --p-j: #5A8DFF;
   --p-l: #FF9A48;
+
+  /* The on-screen controls. They are glass laid over the playfield (see "The
+     button cluster rides OVER the well" below), so the whole palette is
+     alpha: --touch-face is the wash you read the stack through, --touch-edge
+     the ring that says where the button is, --touch-ink the glyph, and
+     --touch-face-hot the flood on press — which is where most of the opacity
+     budget is deliberately spent. */
+  --touch-face:     rgba(19, 27, 48, 0.30);
+  --touch-face-hot: rgba(240, 196, 106, 0.30);
+  --touch-edge:     rgba(126, 160, 220, 0.34);
+  --touch-ink:      rgba(232, 238, 248, 0.64);
 }
 
 /* Dawn well. Same seven hues by name, taken down into the shade so they read
@@ -131,6 +151,11 @@
   --p-z: #B01F10;
   --p-j: #23479F;
   --p-l: #983F06;
+
+  --touch-face:     rgba(255, 252, 246, 0.44);
+  --touch-face-hot: rgba(122, 78, 18, 0.22);
+  --touch-edge:     rgba(92, 72, 48, 0.36);
+  --touch-ink:      rgba(43, 42, 51, 0.70);
 }
 
 /* Only for the sliver of time before Arcade.init() stamps [data-theme], and
@@ -149,6 +174,13 @@
     --menu-hair: rgba(92, 72, 48, 0.17);
     --menu-plate: rgba(255, 252, 246, 0.70);
     --menu-edge: rgba(92, 72, 48, 0.50);
+    /* The controls have to come along: they are the one piece of chrome that
+       sits over the PAGE as often as over the well, and a pale glyph from the
+       dark set on a pale page is a button you cannot find. */
+    --touch-face:     rgba(255, 252, 246, 0.44);
+    --touch-face-hot: rgba(122, 78, 18, 0.22);
+    --touch-edge:     rgba(92, 72, 48, 0.36);
+    --touch-ink:      rgba(43, 42, 51, 0.70);
   }
 }
 
@@ -234,22 +266,39 @@ body {
   min-inline-size: 0;
   min-block-size: 0;
 }
-.rail-left  { grid-area: hud; flex-direction: row; flex-wrap: wrap; align-items: stretch; }
-.rail-right { grid-area: next; align-self: start; inline-size: min(36vw, 10rem); }
+/* The strip NEVER wraps, and this is the rule that decides whether a small
+   phone is playable. It used to: `flex-wrap: wrap` plus a 9rem flex-basis on
+   the readout meant that at 375px — an SE, a mini, a narrow launcher iframe —
+   hold and the readout could not share the 216px the strip had left, so the
+   readout dropped to a second line and the strip went from ~60px to 178px.
+   That is 27% of the screen spent on four numbers, and every pixel of it came
+   off the well. Nothing wraps now; the three blocks shrink together and the
+   readout reflows its own columns instead. */
+.rail-left  { grid-area: hud; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 0.4rem; }
+.rail-right { grid-area: next; align-self: center; flex: 0 1 auto; inline-size: clamp(5rem, 30vw, 9rem); }
 
+/* In the top strip a panel is just its canvas. The plate, the border and the
+   heading are forty-odd pixels of vertical chrome wrapped around a forty-pixel
+   preview, and on a phone that trade is not close — the well wants the height
+   more than "HOLD" wants a caption over a dashed socket that already reads as
+   an empty slot. The heading is hidden VISUALLY, not removed: it is still the
+   accessible name of the region. The side-rail layout (>= 46em) puts all of
+   it back, because there the width is free. */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   min-inline-size: 0;
   min-block-size: 0;
-  padding: 0.35rem 0.4rem 0.45rem;
-  border: 1px solid var(--rule);
-  border-radius: 0.5rem;
-  background: var(--panel);
 }
 
 .panel h2 {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
   font-size: 0.62rem;
   font-weight: 600;
   letter-spacing: 0.14em;
@@ -257,7 +306,7 @@ body {
   color: var(--fg-dim);
 }
 
-#hold-panel { flex: 0 0 auto; inline-size: 4.5rem; }
+#hold-panel { flex: 0 0 auto; inline-size: 3.4rem; }
 #next-panel { flex: 1 1 auto; overflow: hidden; }
 
 /* The preview canvases letterbox rather than stretch, so a renderer that has
@@ -275,38 +324,72 @@ body {
 #hold { aspect-ratio: 4 / 3; }
 #next { aspect-ratio: 5 / 2; max-block-size: 100%; }
 
-/* In the top strip there is width to spare, so the readout is a table: label
-   left, value right, tabular figures so a rolling score never reflows the
-   column. The side rail is ~9rem wide and cannot hold both on one line — see
-   the stacked variant in the side-rail block below. */
+/* In the strip the readout is COLUMNS OF PAIRS, not rows: `grid-auto-flow:
+   column` puts each label directly above its own value, and four explicit rows
+   fold two pairs into every column. Four stats therefore cost two columns and
+   four lines of text, where the old label|value table cost four full-width
+   rows — which is the other half of the 178px the strip used to spend.
+
+   TWO rows rather than four was the first cut and it does not survive contact:
+   five one-pair columns need ~230px at these sizes, a 375px phone leaves the
+   readout 179, and the two that lose are the score and the clock. "1,234,5…"
+   is the one number on this strip nobody can afford to misread. Folded, the
+   widest column is max(Score, Lines) instead of Score alone, and a seven-digit
+   score fits beside a live combo on a 320px screen.
+
+   The combo is what fixes the shape: it appears mid-chain, and in this flow it
+   adds a COLUMN, never a row. The strip's height cannot change while a chain
+   is running — the same promise the old table kept by shipping the row hidden,
+   kept here by the layout instead of by the markup.
+
+   Nothing here can wrap. Shrink-then-ellipsise is the only failure mode, and
+   the columns are content-sized so the value that needs the width gets it.
+   The side rail (>= 46em) turns all of this back into a stacked list. */
 #readout {
-  flex: 1 1 9rem;
+  flex: 1 1 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: 0.6rem;
+  grid-template-rows: repeat(4, auto);
+  grid-auto-flow: column;
+  /* Content-sized, not 1fr. Equal columns are the obvious choice and the
+     wrong one: "0:00.00" is three times the width of "1", so equal columns
+     size every stat to the widest and then clip the clock anyway. `auto` lets
+     each column take what it needs and `space-between` spends the slack on the
+     gaps. minmax(0, auto) keeps the floor at zero so a six-figure score
+     ellipsises instead of pushing the queue off the strip. */
+  grid-auto-columns: minmax(0, auto);
+  justify-content: space-between;
+  column-gap: 0.45rem;
   align-content: center;
+  justify-items: start;
   min-inline-size: 0;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--rule);
-  border-radius: 0.5rem;
-  background: var(--panel);
+  /* No inline padding: the strip readout has no plate to sit inside, and the
+     3px it would cost is the difference between a seven-figure score fitting
+     beside a live combo on a 375px phone and ellipsising by four pixels. */
+  padding-block: 0.1rem;
+  /* Two lines of text stacked with the body's 1.35 leading spend ~9px on air
+     between a label and its own value, which is the one place in the strip
+     where leading buys nothing — the pair is already read as one thing. */
+  line-height: 1.15;
 }
 #readout dt {
+  max-inline-size: 100%;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 0.64rem;
+  font-size: 0.5rem;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-dim);
   align-self: center;
 }
 #readout dd {
-  font-size: 0.95rem;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.88rem;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
-  text-align: end;
   white-space: nowrap;
 }
 #v-score { color: var(--accent); }
@@ -567,12 +650,14 @@ body {
      layer can still hand over the true value with setOpts({ cellPx }); this is
      what the fallback is worth without it. */
   /* 100cqh is #touch's full height; the well only gets what the top strip
-     leaves it, so subtract the chrome before halving. Measured against the
-     real layout this lands within ~1% at 390x844 and 420x520. The clamp floor
-     is the safety rail: on an absurdly short viewport the subtraction could go
-     negative, and a zero-width surface is a game that silently ignores every
-     gesture. */
-  inline-size: clamp(4rem, calc((100cqh - 7rem) / 2), 100%);
+     leaves it, so subtract the chrome before halving. 5rem is that chrome as
+     the strip now stands — #app's own padding (1rem) plus a ~3.4rem strip plus
+     the 0.5rem gap — and it was 7rem while the strip could still wrap to two
+     rows. Measured against the real layout it lands within ~1% at 375x667 and
+     390x844. The clamp floor is the safety rail: on an absurdly short viewport
+     the subtraction could go negative, and a zero-width surface is a game that
+     silently ignores every gesture. */
+  inline-size: clamp(4rem, calc((100cqh - 5rem) / 2), 100%);
   margin-inline: auto;         /* left:0 + right:0 + auto margins = centred */
   touch-action: none;
   pointer-events: auto;
@@ -595,24 +680,71 @@ body {
   color: var(--fg-dim);
 }
 
-/* Secondary scheme: the accessibility path, for players who cannot hold a
-   precise drag. Back into the column flow, docked under the stage, so it takes
-   real space instead of covering the well. */
+/* ── The button cluster rides OVER the well ───────────────────────────────
+   Secondary scheme: the accessibility path, for players who cannot hold a
+   precise drag. It used to dock under the stage, in the column flow, "so it
+   takes real space instead of covering the well". Measured on a 375x667 phone
+   that cost 112px out of a 591px column: the well came out 176x352 — a 17.6px
+   cell, four fifths the size the gesture scheme gets on the same handset — and
+   the players who most need this scheme were the ones playing the smallest
+   board. So the trade is reversed. The cluster is glass over the playfield and
+   the well takes the height back.
+
+   Two properties make the overlap survivable, and both are load-bearing:
+
+   · The layer is mostly HOLE. #touch and .touch-cluster take no pointer
+     events at all; only the buttons do. Every part of the well that is not
+     directly under a button is still just the well, which is also why the
+     cluster can be stretched edge to edge without stealing anything.
+   · A button is a ring and a glyph over a wash, not a plate. You read the
+     stack through it. Pressing floods it instead — most of the opacity budget
+     is spent on the feedback rather than on the resting state, because a
+     control you cannot see through is worse here than one you can barely see.
+
+   The well still steps back by --touch-reserve so the lowest rows — the ones
+   actually being placed into — sit above the glass rather than under it. The
+   :has() is the whole hook: the scheme lives on #touch, and this is a
+   sibling's ancestor. Where it is not supported the reserve is simply 0 and
+   the pads overlap a little further, which is a degradation, not a break. */
+#app:has(#touch[data-scheme="buttons"]) .well-wrap {
+  /* MARGIN, not padding, and the distinction is load-bearing: js/render's
+     fitWell() measures this element with getBoundingClientRect(), which is the
+     border box — padding would stay inside it, so the renderer would size the
+     well to the full track and centring would push it straight back down under
+     the pads. A margin takes the space out of the box the renderer measures. */
+  margin-block-end: var(--touch-reserve);
+}
+
 #touch[data-scheme="buttons"] {
-  position: relative;
-  inset: auto;
-  z-index: auto;
-  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  /* #touch's inset: 0 resolves against #app's PADDING box, so the layer
+     already reaches under #app's own safe-area padding. This puts the same
+     clearance back inside the layer rather than doubling it — without it the
+     bottom row of buttons sits on the home indicator. */
+  padding:
+    0
+    max(0.5rem, env(safe-area-inset-right))
+    max(0.5rem, env(safe-area-inset-bottom))
+    max(0.5rem, env(safe-area-inset-left));
+  pointer-events: none;
 }
 #touch[data-scheme="buttons"] .touch-cluster {
+  flex: 1 1 auto;
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--touch-gap);
+  /* On a laptop the pads would otherwise sit at the far edges of a 1440px
+     window with the well a thumbnail between them. */
+  max-inline-size: min(100%, 34rem);
+  margin-inline: auto;
+  pointer-events: none;
 }
 #touch[data-scheme="buttons"] .touch-pad {
   display: grid;
-  gap: 0.5rem;
+  gap: var(--touch-gap);
+  pointer-events: none;
 }
 #touch[data-scheme="buttons"] .touch-pad[data-pad="move"]   { grid-template-columns: repeat(3, auto); }
 #touch[data-scheme="buttons"] .touch-pad[data-pad="action"] { grid-template-columns: repeat(2, auto); }
@@ -628,19 +760,26 @@ body {
 }
 
 #touch[data-scheme="buttons"] .touch-btn {
-  /* Never below 44 CSS px, and larger when the player has scaled type up.
-     This is the accessibility scheme; it is the one that has to be hittable. */
+  /* The buttons are the only part of this layer that answers a pointer.
+     --touch-btn is the size (~52px on a 375px phone, up to 72px), and the
+     min-* pair is the floor from DESIGN.md §4: never below 44 CSS px, and
+     larger when the player has scaled type up. This is the accessibility
+     scheme; it is the one that has to be hittable. Round, because a circle is
+     the shape of the thing pressing it and because the gaps between circles
+     are more well than the gaps between rounded squares. */
+  pointer-events: auto;
+  inline-size: var(--touch-btn);
+  block-size: var(--touch-btn);
   min-inline-size: max(3rem, 44px);
   min-block-size: max(3rem, 44px);
   display: grid;
   place-items: center;
-  padding: 0.5rem;
-  border: 1px solid var(--rule);
-  border-radius: 0.7rem;
-  background: var(--panel);
-  color: var(--fg);
+  padding: 0;
+  border: 1px solid var(--touch-edge);
+  border-radius: 50%;
+  background: var(--touch-face);
+  color: var(--touch-ink);
   font: inherit;
-  font-size: 1.05rem;
   line-height: 1;
   cursor: pointer;
   touch-action: none;
@@ -648,13 +787,17 @@ body {
 }
 #touch[data-scheme="buttons"] .touch-glyph {
   display: block;
-  font-size: 1.15rem;
+  font-size: calc(var(--touch-btn) * 0.42);
   line-height: 1;
   pointer-events: none;   /* the press target is the button, not the glyph */
 }
+/* The press is where the opacity goes. Resting, a button is barely there; held
+   down it is unmistakable, which is the only moment the player needs it to be
+   — and it is how you tell a registered press from a finger that missed. */
 #touch[data-scheme="buttons"] .touch-btn:active,
 #touch[data-scheme="buttons"] .touch-btn[aria-pressed="true"] {
   transform: scale(0.94);
+  background: var(--touch-face-hot);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -858,10 +1001,18 @@ body {
 }
 
 /* ─── Laptop, desktop, and phone landscape ────────────────────────────────
-   46em ≈ 736px: wide enough that side rails cost the well nothing. A phone
-   held sideways lands here too, which is right — width is what side rails
-   need, and the short-viewport block below takes care of the height. */
-@media (min-width: 46em) {
+   46em ≈ 736px: wide enough that side rails cost the well nothing.
+
+   The second clause is the phone actually held sideways. 46em was picked on
+   the theory that a landscape phone lands there anyway, and the big ones do —
+   but a 667x375 SE does not, so it kept the portrait top strip: 58px of chrome
+   off a 351px column, and with the pads under it as well the well came out
+   eleven pixels a cell. Short-and-wide is exactly the case side rails are for.
+   They are paid for in width, which landscape has, and they cost no height,
+   which it does not. 30em/30em is the diagonal: wide enough to seat two rails
+   (480px), short enough that the strip is the expensive way to spend it, and
+   nothing in portrait can satisfy both. */
+@media (min-width: 46em), (min-width: 30em) and (max-height: 30em) {
   #app { gap: 0.6rem; padding: max(0.75rem, env(safe-area-inset-top))
                               max(0.75rem, env(safe-area-inset-right))
                               max(0.75rem, env(safe-area-inset-bottom))
@@ -879,48 +1030,108 @@ body {
   .touch-gesture { inline-size: clamp(4rem, calc((100cqh - 1.5rem) / 2), 100%); }
 
   .rail { inline-size: clamp(5.5rem, 13vw, 11rem); }
-  .rail-left { flex-direction: column; }
-  .rail-right { align-self: stretch; inline-size: clamp(5.5rem, 13vw, 11rem); }
+  .rail-left { flex-direction: column; align-items: stretch; gap: 0.5rem; }
+  .rail-right { align-self: stretch; flex: 0 0 auto; inline-size: clamp(5.5rem, 13vw, 11rem); }
 
   #hold-panel { inline-size: auto; }
   #hold { aspect-ratio: 4 / 3; }
   #next { aspect-ratio: 8 / 25; }   /* the queue stands up again: 5 previews, top-down */
 
+  /* Here the width is free, so the panels get their plate and their caption
+     back — everything the phone strip strips out. */
+  .panel {
+    padding: 0.35rem 0.4rem 0.45rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.5rem;
+    background: var(--panel);
+  }
+  .panel h2 {
+    position: static;
+    inline-size: auto;
+    block-size: auto;
+    overflow: visible;
+    clip-path: none;
+    font-size: 0.68rem;
+  }
+
   /* Stacked, one column: at 9rem "SCORE" and "128,400" do not fit side by
      side, and the two-column form silently ellipsised every label down to
-     "SC…". The value is the thing worth the width. */
+     "SC…". The value is the thing worth the width. `grid-auto-flow: row`
+     undoes the strip's column-of-pairs — down the rail the pairs run
+     top-down, one per line, which is what a 1fr single column means. */
   #readout {
     flex: 0 0 auto;
+    grid-auto-flow: row;
+    grid-template-rows: none;
     grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+    justify-items: stretch;
+    line-height: 1.35;
     padding: 0.5rem 0.6rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.5rem;
+    background: var(--panel);
   }
-  .rail-left { flex-wrap: nowrap; }
-  #readout dt { font-size: 0.7rem; }
+  #readout dt { font-size: 0.7rem; letter-spacing: 0.1em; }
   #readout dd { font-size: 1.25rem; text-align: start; margin-block-end: 0.5rem; }
   #readout dd:last-of-type { margin-block-end: 0; }
 
   #banner { font-size: 1.6rem; }
-  .panel h2 { font-size: 0.68rem; }
+}
+
+/* Narrow phone — a 320px SE, a 360px Android, a slim launcher iframe. There
+   is no layout change here, only less of everything: the strip is already one
+   row and the only question is whether four stats and a clock still fit across
+   it. 23em = 368px is where, measured, "0:00.01" starts losing its hundredths
+   at the strip's regular sizes. Everything shrinks; nothing moves. */
+@media (max-width: 23em) {
+  #hold-panel { inline-size: 2.9rem; }
+  .rail-right { inline-size: clamp(4rem, 26vw, 9rem); }
+
+  /* The fold is already the strip's shape; here it just gets tighter. */
+  #readout {
+    column-gap: 0.4rem;
+    line-height: 1.1;
+  }
+  #readout dt { font-size: 0.48rem; }
+  #readout dd { font-size: 0.82rem; }
 }
 
 /* Short viewport — a phone in landscape, or a very short launcher iframe.
    The chrome gives up its padding first; the well is the last thing to
    shrink and it is never allowed to overflow into a scroll. */
 @media (max-height: 34em) {
-  #app { gap: 0.35rem; }
+  /* A landscape phone has no height to spend on chrome and none to spend on
+     controls either: the pads come down to the 44px floor so the well keeps
+     what is left. */
+  #app { gap: 0.35rem; --touch-btn: max(3rem, 44px); --touch-gap: 0.35rem; }
   #stage { gap: 0.4rem; }
-  .panel { padding: 0.25rem 0.3rem 0.3rem; gap: 0.15rem; }
-  .panel h2 { font-size: 0.58rem; letter-spacing: 0.1em; }
-  #readout { padding: 0.2rem 0.4rem; }
-  #readout dt { font-size: 0.6rem; }
-  #readout dd { font-size: 0.9rem; margin-block-end: 0.25rem; }
+  .panel { gap: 0.15rem; }
+  #readout { padding-block: 0.05rem; }
   #banner { font-size: 1.1rem; inset-block-start: 8%; }
 }
 
 /* Narrow the SIDE rails only. The same rule applied to the top strip squeezed
-   the next queue down to a 60x24 sliver on a 420x520 iframe. */
-@media (min-width: 46em) and (max-height: 34em) {
+   the next queue down to a 60x24 sliver on a 420x520 iframe. The second clause
+   matches the landscape-phone one above: wherever the rails come out, they
+   come out narrow on a short viewport. */
+@media (min-width: 46em) and (max-height: 34em),
+       (min-width: 30em) and (max-height: 30em) {
   .rail, .rail-right { inline-size: clamp(4.5rem, 11vw, 7rem); }
+
+  /* No reserve here. The rails hold the well to a narrow column in the middle
+     and the pads sit out in the rails' own width, so on a landscape phone they
+     never cross it — measured, the action pad's inner edge clears the well by
+     30px at 844x390 and by 80px at 667x375. Stepping back from a pad that is
+     not there costs ~40px of the one dimension this viewport has none of: at
+     667x375 it is the difference between a 14.3px cell and a 16.3px one. */
+  #app:has(#touch[data-scheme="buttons"]) .well-wrap { margin-block-end: 0; }
+
+  .panel { padding: 0.25rem 0.3rem 0.3rem; }
+  .panel h2 { font-size: 0.58rem; letter-spacing: 0.1em; }
+  #readout { padding: 0.2rem 0.4rem; }
+  #readout dt { font-size: 0.6rem; }
+  #readout dd { font-size: 0.9rem; margin-block-end: 0.25rem; }
 }
 
 /* ─── The menu ────────────────────────────────────────────────────────────
