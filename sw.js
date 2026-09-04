@@ -11,7 +11,7 @@
 // DO NOT EDIT BY HAND, and keep the line exactly as written — single quotes,
 // no leading whitespace — or the deploy-time rewrite silently stops firing
 // and every fix ships to nobody who has already visited.
-const APP_VERSION = '0.1.4';
+const APP_VERSION = '0.1.5';
 
 // Every cache this game will ever own starts with this prefix. Cleanup is
 // filtered to it; see activate for why that is not optional.
