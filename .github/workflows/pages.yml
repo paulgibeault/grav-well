@@ -31,3 +31,5 @@ jobs:
       # The fleet norm for any app with a service worker: CI owns the cache
       # version (§10).
       version_bump: true
+      # Publish the game's offline pack so the launcher can run it with no network.
+      offline_pack: true
